@@ -5,3 +5,7 @@ dev-dist/
 .DS_Store
 
 .vercel
+.env*
+
+.secrets.local
+.env.prodcheck

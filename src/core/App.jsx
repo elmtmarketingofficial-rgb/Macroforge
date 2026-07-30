@@ -5,17 +5,22 @@ import {
   CalendarDays, BarChart3, Settings, Download, Upload, Copy, Trophy,
   Pause, Play, RotateCcw, Search, BookOpen, Utensils, Scale, Zap, Star,
   ChefHat, CalendarRange, Sparkles, ClipboardList, History, ArrowRight,
-  Globe, BadgeCheck, WifiOff
+  Globe, BadgeCheck, WifiOff, ScanLine, Bell, GlassWater, Package
 } from 'lucide-react';
 import {
   num, round, calsFrom, e1rm, todayISO, parseISO, addDays, daysBetween, fmtDate,
-  entryMacros, weightTrend, computeTDEE, mifflin, suggestMacros, dayScore,
+  entryMacros, entryExtras, weightTrend, computeTDEE, mifflin, suggestMacros, dayScore,
   foodPortion, isPer100g,
 } from '../lib/engine';
-import { aggregatePlan } from '../lib/grocery';
 import { normalizeImport } from '../lib/importer';
 import { searchOff } from '../lib/off';
+import { generatePlan } from '../lib/planner';
+import { remainingGap } from '../lib/pyramid';
+import { DEFAULT_MEALS, defaultMealsFor, dueMealReminders, dueNudges, fireKey, slotForMealIndex } from '../lib/reminders';
 import { storage } from '../storage';
+
+/* Barcode scanner loads lazily — camera + decoder stay out of the main bundle */
+const Scanner = React.lazy(() => import('./Scanner.jsx'));
 import { T, MACROS, MK, display, mono } from './tokens';
 
 /* Recharts loads in its own lazy chunk — see Charts.jsx */
@@ -334,12 +339,13 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
           {recipes.length === 0 && <div className="text-xs px-1 py-4 text-center" style={{ color: T.faint }}>No recipes yet — build them in Settings → Recipes, or save a combo you eat often.</div>}
           {recipeMatches.map((r) => {
             const m = recipeMacros(r, foods);
+            const po = Math.max(1, num(r.portions) || 1);
             return (
               <button key={r.id} onClick={() => { onAddRecipe(r); setLast(r.name); }} className="flex items-center justify-between rounded-lg px-3 py-2 text-left transition"
                 style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
                 <div className="min-w-0">
                   <div className="text-sm truncate" style={{ color: T.text, fontWeight: 600 }}>{r.emoji || '🍳'} {r.name}</div>
-                  <div style={{ ...mono, fontSize: 11, color: T.faint }}>{MK.map((k) => `${round(m[k])}${k[0]}`).join('  ')} · {Math.round(calsFrom(m.protein, m.carbs, m.fat))} kcal · {(r.items || []).length} items</div>
+                  <div style={{ ...mono, fontSize: 11, color: T.faint }}>{MK.map((k) => `${round(m[k] / po)}${k[0]}`).join('  ')} · {Math.round(calsFrom(m.protein, m.carbs, m.fat) / po)} kcal{po > 1 ? ' / portion' : ''} · {(r.items || []).length} items</div>
                 </div>
                 <Plus size={16} style={{ color: T.lime }} />
               </button>
@@ -436,7 +442,7 @@ function coachSuggestion({ totals, goals, foods }) {
   };
 }
 
-function TodayView({ settings, log, setLog, foods, recipes, ensureFood, plan, streak }) {
+function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureFood, plan, streak, water, setWater }) {
   const goals = settings.goals;
   const [viewDate, setViewDate] = useState(todayISO());
   const [picker, setPicker] = useState(false);
@@ -444,6 +450,11 @@ function TodayView({ settings, log, setLog, foods, recipes, ensureFood, plan, st
   const isToday = viewDate === todayISO();
   const entries = useMemo(() => log.filter((e) => e.date === viewDate), [log, viewDate]);
   const totals = useMemo(() => entryMacros(entries), [entries]);
+  const extras = useMemo(() => entryExtras(entries), [entries]);
+  const waterToday = useMemo(() => water.filter((w) => w.date === viewDate).reduce((s, w) => s + num(w.ml), 0), [water, viewDate]);
+  const waterGoal = num(settings.waterMl) || 2000;
+  const addWater = (ml) => setWater((ws) => [...ws, { id: uid(), date: viewDate, ml }]);
+  const undoWater = () => setWater((ws) => { const idx = ws.map((w) => w.date).lastIndexOf(viewDate); return idx >= 0 ? ws.filter((_, i) => i !== idx) : ws; });
   const cals = calsFrom(totals.protein, totals.carbs, totals.fat);
   const goalCals = calsFrom(goals.protein, goals.carbs, goals.fat);
   const remaining = goalCals - cals;
@@ -456,9 +467,13 @@ function TodayView({ settings, log, setLog, foods, recipes, ensureFood, plan, st
   const delEntry = (id) => setLog((l) => l.filter((e) => e.id !== id));
   const addExisting = (fd, servings) => {
     const per = foodPortion(fd);
-    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'food', refId: fd.id, name: fd.name, category: fd.category, servings: servings ?? per.qty, unitLabel: per.unitLabel, protein: per.protein, carbs: per.carbs, fat: per.fat }, ...l]);
+    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'food', refId: fd.id, name: fd.name, category: fd.category, servings: servings ?? per.qty, unitLabel: per.unitLabel, protein: per.protein, carbs: per.carbs, fat: per.fat, fiber: per.fiber, sugar: per.sugar }, ...l]);
   };
-  const addRecipe = (r) => { const m = recipeMacros(r, foods); setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'recipe', refId: r.id, name: r.name, servings: 1, protein: m.protein, carbs: m.carbs, fat: m.fat }, ...l]); };
+  const addRecipe = (r) => {
+    const m = recipeMacros(r, foods);
+    const portions = Math.max(1, num(r.portions) || 1); // batch recipes log one portion
+    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'recipe', refId: r.id, name: portions > 1 ? `${r.name} (1 of ${portions})` : r.name, servings: 1, protein: m.protein / portions, carbs: m.carbs / portions, fat: m.fat / portions }, ...l]);
+  };
   const addCustom = ({ name, category, protein, carbs, fat, servings, unit, unitLabel, saveToLibrary }) => {
     let foodId = null;
     if (saveToLibrary) { const fd = ensureFood({ name, category, protein, carbs, fat, unit }); foodId = fd.id; }
@@ -471,7 +486,7 @@ function TodayView({ settings, log, setLog, foods, recipes, ensureFood, plan, st
   };
   const addOff = (r) => {
     const name = r.brand && !r.name.toLowerCase().includes(r.brand.toLowerCase()) ? `${r.name} (${r.brand})` : r.name;
-    const fd = ensureFood({ name, category: 'Other', protein: r.protein, carbs: r.carbs, fat: r.fat, unit: 'g100' });
+    const fd = ensureFood({ name, category: 'Other', protein: r.protein, carbs: r.carbs, fat: r.fat, fiber: r.fiber, sugar: r.sugars, unit: 'g100' });
     addExisting(fd);
   };
   const copyYesterday = () => {
@@ -520,8 +535,32 @@ function TodayView({ settings, log, setLog, foods, recipes, ensureFood, plan, st
           </div>
         )}
         <div className="flex flex-col gap-3">{MK.map((k) => <MacroBar key={k} k={k} value={totals[k]} goal={num(goals[k])} />)}</div>
+        {(extras.fiber > 0 || extras.sugar > 0) && (
+          <div className="flex items-center gap-4 mt-3 pt-3" style={{ borderTop: `1px solid ${T.border}`, ...mono, fontSize: 11 }}>
+            <span style={{ color: extras.fiber >= (num(settings.fiberG) || 30) ? T.lime : T.muted }}>fiber {round(extras.fiber)}<span style={{ color: T.faint }}>/{num(settings.fiberG) || 30}g</span></span>
+            <span style={{ color: extras.sugar > (num(settings.sugarMaxG) || 50) ? T.orange : T.muted }}>sugar {round(extras.sugar)}<span style={{ color: T.faint }}>/{num(settings.sugarMaxG) || 50}g max</span></span>
+            <span className="text-xs" style={{ color: T.faint, fontFamily: "'Archivo', sans-serif" }}>from scanned & OFF foods</span>
+          </div>
+        )}
       </Card>
-      <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }}>
+      <Card style={{ padding: '12px 16px' }}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <GlassWater size={15} style={{ color: '#46b8ff' }} />
+            <span style={{ ...mono, fontSize: 13, color: T.text, fontWeight: 600 }}>{waterToday >= 1000 ? `${round(waterToday / 1000)}L` : `${waterToday}ml`}</span>
+            <span className="text-xs" style={{ color: T.faint }}>/ {waterGoal >= 1000 ? `${round(waterGoal / 1000)}L` : `${waterGoal}ml`} water</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            {waterToday > 0 && <button onClick={undoWater} className="text-xs px-1" style={{ color: T.faint }}>undo</button>}
+            <button onClick={() => addWater(250)} className="rounded-lg px-2.5 py-1 text-xs" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: '#46b8ff', fontWeight: 700, ...mono }}>+250</button>
+            <button onClick={() => addWater(500)} className="rounded-lg px-2.5 py-1 text-xs" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: '#46b8ff', fontWeight: 700, ...mono }}>+500</button>
+          </div>
+        </div>
+        <div className="rounded-full overflow-hidden mt-2" style={{ height: 5, background: T.panel2 }}>
+          <div style={{ height: '100%', width: `${Math.min(100, (waterToday / waterGoal) * 100)}%`, background: '#46b8ff', borderRadius: 999, transition: 'width .3s' }} />
+        </div>
+      </Card>
+      <div className="flex gap-1.5 overflow-x-auto pb-0.5" style={{ scrollbarWidth: 'none' }} data-noswipe>
         {yesterday.length > 0 && <Chip onClick={copyYesterday}><Zap size={12} /> Copy yesterday</Chip>}
         {planned.length > 0 && entries.length === 0 && <Chip active onClick={eatAsPlanned}><CalendarRange size={12} /> Ate as planned ({planned.length})</Chip>}
         {favs.map((fd) => (
@@ -596,9 +635,10 @@ function PlanMealPicker({ open, onClose, foods, recipes, onPick }) {
       <div className="flex flex-col gap-1 mb-3">
         {rs.map((r) => {
           const m = recipeMacros(r, foods);
+          const po = Math.max(1, num(r.portions) || 1);
           return (
-            <button key={r.id} onClick={() => onPick({ refType: 'recipe', refId: r.id, name: r.name, protein: m.protein, carbs: m.carbs, fat: m.fat })} className="flex items-center justify-between rounded-lg px-3 py-2 text-left" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
-              <div className="min-w-0"><div className="text-sm truncate" style={{ fontWeight: 600 }}>{r.emoji || '🍳'} {r.name}</div><div style={{ ...mono, fontSize: 11, color: T.faint }}>{Math.round(calsFrom(m.protein, m.carbs, m.fat))} kcal</div></div>
+            <button key={r.id} onClick={() => onPick({ refType: 'recipe', refId: r.id, name: po > 1 ? `${r.name} (1 of ${po})` : r.name, protein: m.protein / po, carbs: m.carbs / po, fat: m.fat / po })} className="flex items-center justify-between rounded-lg px-3 py-2 text-left" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+              <div className="min-w-0"><div className="text-sm truncate" style={{ fontWeight: 600 }}>{r.emoji || '🍳'} {r.name}</div><div style={{ ...mono, fontSize: 11, color: T.faint }}>{Math.round(calsFrom(m.protein, m.carbs, m.fat) / po)} kcal{po > 1 ? ' / portion' : ''}</div></div>
               <Plus size={16} style={{ color: T.lime }} />
             </button>
           );
@@ -665,15 +705,17 @@ function AddGrocery({ onAdd, foods, ensureFood }) {
     </Card>
   );
 }
-function PlanView({ settings, setSettings, plan, setPlan, groceries, setGroceries, foods, recipes, ensureFood, log }) {
+function PlanView({ settings, setSettings, plan, setPlan, groceries, setGroceries, pantry, setPantry, foods, recipes, ensureFood, log, meals, onUnknownScan }) {
   const goals = settings.goals;
   const [anchor, setAnchor] = useState(todayISO());
   const [selDate, setSelDate] = useState(todayISO());
   const [pickerFor, setPickerFor] = useState(null); // meal id
   const [expanded, setExpanded] = useState(null);
   const [genOpen, setGenOpen] = useState(false);
-  const [genFrom, setGenFrom] = useState(todayISO());
-  const [genTo, setGenTo] = useState(addDays(todayISO(), 3));
+  const [genStart, setGenStart] = useState(todayISO());
+  const [genDays, setGenDays] = useState(7);
+  const [scanOpen, setScanOpen] = useState(false);
+  const stripTouch = useRef(null);
   const week = weekDates(anchor);
   const goalCals = calsFrom(goals.protein, goals.carbs, goals.fat);
   const dayPlan = useMemo(() => plan.filter((e) => e.date === selDate), [plan, selDate]);
@@ -685,13 +727,52 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
   const copyDayTo = (targetDates) => {
     setPlan((p) => [...p, ...targetDates.flatMap((d) => dayPlan.map((e) => ({ ...e, id: uid(), date: d })))]);
   };
-  const generateList = () => {
-    const items = aggregatePlan({ plan, recipes, foods, from: genFrom, to: genTo }).map((it) => ({ id: uid(), ...it, checked: false, source: 'generated' }));
-    setGroceries((gs) => {
-      const kept = gs.filter((g) => !items.some((it) => it.name.toLowerCase() === g.name.toLowerCase() && g.source === 'generated'));
-      return [...items, ...kept];
-    });
+  /* ingredients-first: the plan is generated FROM the grocery list + pantry */
+  const inventory = useMemo(() => [...groceries, ...pantry].map((g) => ({
+    name: g.name, category: g.category,
+    protein: g.protein, carbs: g.carbs, fat: g.fat,
+    qty: g.qty, unitLabel: g.unitLabel || null,
+    refId: (foods.find((f) => f.name.trim().toLowerCase() === String(g.name).trim().toLowerCase()) || {}).id || null,
+  })), [groceries, pantry, foods]);
+  const preview = useMemo(() => {
+    if (!genOpen) return null;
+    return generatePlan({ items: inventory, goals, startDate: genStart, days: Math.max(1, Math.min(14, num(genDays) || 7)), mealsPerDay: meals.length });
+  }, [genOpen, inventory, goals, genStart, genDays, meals.length]);
+  const writePlan = () => {
+    if (!preview || !preview.entries.length) return;
+    const days = Math.max(1, Math.min(14, num(genDays) || 7));
+    const end = addDays(genStart, days - 1);
+    setPlan((p) => [
+      ...p.filter((e) => e.date < genStart || e.date > end),
+      ...preview.entries.map((e) => ({ id: uid(), ...e })),
+    ]);
     setGenOpen(false);
+    setSelDate(genStart);
+    setAnchor(genStart);
+  };
+  /* checked-off groceries move into the pantry (you own them now) */
+  const moveBoughtToPantry = () => {
+    const bought = groceries.filter((g) => g.checked);
+    if (!bought.length) return;
+    setPantry((ps) => {
+      const next = [...ps];
+      bought.forEach((b) => {
+        const i = next.findIndex((p) => p.name.trim().toLowerCase() === b.name.trim().toLowerCase());
+        if (i >= 0) next[i] = { ...next[i], qty: round((num(next[i].qty) || 0) + (num(b.qty) || 0)) };
+        else next.push({ id: uid(), name: b.name, category: b.category, protein: b.protein, carbs: b.carbs, fat: b.fat, unitLabel: b.unitLabel || null, qty: num(b.qty) || 1 });
+      });
+      return next;
+    });
+    setGroceries((gs) => gs.filter((g) => !g.checked));
+  };
+  const updPantry = (id, patch) => setPantry((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
+  const delPantry = (id) => setPantry((ps) => ps.filter((p) => p.id !== id));
+  /* scanner: add a scanned product to the list or pantry as a per-100g item */
+  const addScanned = (product, dest) => {
+    ensureFood({ name: product.name, category: 'Other', protein: product.protein, carbs: product.carbs, fat: product.fat, fiber: product.fiber, sugar: product.sugars, unit: 'g100' });
+    const row = { id: uid(), name: product.name, category: 'Other', qty: 100, unitLabel: 'g', protein: product.protein / 100, carbs: product.carbs / 100, fat: product.fat / 100, checked: false, source: 'manual' };
+    if (dest === 'pantry') setPantry((ps) => [{ ...row, qty: 100 }, ...ps]);
+    else setGroceries((gs) => [row, ...gs]);
   };
   /* groceries summary */
   const totals = useMemo(() => groceries.reduce((a, it) => { const q = num(it.qty) || 0; a.protein += num(it.protein) * q; a.carbs += num(it.carbs) * q; a.fat += num(it.fat) * q; return a; }, { protein: 0, carbs: 0, fat: 0 }), [groceries]);
@@ -700,13 +781,19 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
   const totalCals = calsFrom(totals.protein, totals.carbs, totals.fat);
   const update = (id, patch) => setGroceries((gs) => gs.map((g) => (g.id === id ? { ...g, ...patch } : g)));
   const remove = (id) => setGroceries((gs) => gs.filter((g) => g.id !== id));
-  const clearBought = () => setGroceries((gs) => gs.filter((g) => !g.checked));
   const grouped = useMemo(() => { const map = {}; [...groceries].sort((a, b) => (a.checked === b.checked ? 0 : a.checked ? 1 : -1)).forEach((it) => { (map[it.category] = map[it.category] || []).push(it); }); return CATEGORIES.filter((c) => map[c]).map((c) => [c, map[c]]); }, [groceries]);
   const boughtCount = groceries.filter((g) => g.checked).length;
   return (
     <div className="flex flex-col gap-3 fadein">
-      {/* week strip */}
-      <div className="flex items-center gap-1.5">
+      {/* week strip — swipe left/right to page weeks */}
+      <div className="flex items-center gap-1.5" data-noswipe
+        onTouchStart={(e) => { stripTouch.current = e.touches[0].clientX; }}
+        onTouchEnd={(e) => {
+          const s = stripTouch.current; stripTouch.current = null;
+          if (s == null) return;
+          const dx = e.changedTouches[0].clientX - s;
+          if (Math.abs(dx) > 50) setAnchor((a) => addDays(a, dx < 0 ? 7 : -7));
+        }}>
         <GhostBtn onClick={() => setAnchor((a) => addDays(a, -7))}><ChevronLeft size={16} /></GhostBtn>
         <div className="flex-1 grid grid-cols-7 gap-1">
           {week.map((d) => {
@@ -765,7 +852,7 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
           </div>
         )}
       </Card>
-      <PrimaryBtn onClick={() => setGenOpen(true)} full><ShoppingCart size={15} /> Generate grocery list from plan</PrimaryBtn>
+      <PrimaryBtn onClick={() => setGenOpen(true)} full><Sparkles size={15} /> Generate plan from groceries</PrimaryBtn>
       {/* list nutrition */}
       <Card style={{ background: `linear-gradient(160deg, ${T.panel}, #101013)` }}>
         <div className="flex items-center justify-between mb-3">
@@ -782,10 +869,13 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
       <AddGrocery onAdd={(item) => setGroceries((gs) => [item, ...gs])} foods={foods} ensureFood={ensureFood} />
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between px-1">
-          <Label>Shopping list · {groceries.length} item{groceries.length === 1 ? '' : 's'}</Label>
-          {boughtCount > 0 && <button onClick={clearBought} className="flex items-center gap-1 text-xs transition" style={{ color: T.faint }}><Eraser size={12} /> clear {boughtCount} bought</button>}
+          <div className="flex items-center gap-2">
+            <Label>Shopping list · {groceries.length} item{groceries.length === 1 ? '' : 's'}</Label>
+            <button onClick={() => setScanOpen(true)} className="flex items-center gap-1 rounded-md px-2 py-0.5 text-xs transition" style={{ background: T.limeDim, border: '1px solid rgba(203,255,58,0.35)', color: T.lime, fontWeight: 700 }}><ScanLine size={12} /> scan</button>
+          </div>
+          {boughtCount > 0 && <button onClick={moveBoughtToPantry} className="flex items-center gap-1 text-xs transition" style={{ color: T.faint }}><Package size={12} /> move {boughtCount} bought to pantry</button>}
         </div>
-        {groceries.length === 0 && <EmptyCard Icon={ShoppingCart} text="List is empty. Generate it from your plan, or add items above." />}
+        {groceries.length === 0 && <EmptyCard Icon={ShoppingCart} text="List is empty. Add items above, or scan barcodes at the store." />}
         {grouped.map(([cat, items]) => (
           <div key={cat}>
             <div className="px-1 mb-1.5"><Label>{cat}</Label></div>
@@ -825,15 +915,67 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
           </div>
         ))}
       </div>
-      <PlanMealPicker open={!!pickerFor} onClose={() => setPickerFor(null)} foods={foods} recipes={recipes} onPick={(item) => { addToPlan(pickerFor, item); }} />
-      <Modal open={genOpen} onClose={() => setGenOpen(false)} title="Generate list" icon={<ShoppingCart size={16} style={{ color: T.lime }} />}>
-        <div className="text-xs mb-3" style={{ color: T.muted, lineHeight: 1.5 }}>Aggregates every planned meal in the range into shopping quantities, grouped by aisle. Re-generating replaces earlier plan-generated items; manual items are untouched.</div>
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          <div><Label>From</Label><input type="date" value={genFrom} onChange={(e) => setGenFrom(e.target.value)} className="w-full rounded-lg px-2.5 py-1.5 text-sm outline-none mt-1" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono }} /></div>
-          <div><Label>To</Label><input type="date" value={genTo} onChange={(e) => setGenTo(e.target.value)} className="w-full rounded-lg px-2.5 py-1.5 text-sm outline-none mt-1" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono }} /></div>
+      {/* pantry */}
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center justify-between px-1">
+          <Label>Pantry · {pantry.length} item{pantry.length === 1 ? '' : 's'}</Label>
         </div>
-        <PrimaryBtn onClick={generateList} full><Sparkles size={15} /> Build the list</PrimaryBtn>
+        {pantry.length === 0 ? (
+          <EmptyCard Icon={Package} text="Nothing in the pantry. Check off groceries and move them here — the plan generator cooks from both." />
+        ) : (
+          <div className="flex flex-col gap-1.5">
+            {pantry.map((it) => {
+              const q = num(it.qty) || 0;
+              return (
+                <div key={it.id} className="flex items-center gap-2.5 rounded-xl px-3 py-2.5" style={{ background: T.panel, border: `1px solid ${T.border}` }}>
+                  <Package size={15} style={{ color: T.faint, flexShrink: 0 }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-sm truncate" style={{ color: T.text, fontWeight: 600 }}>{it.name} <span style={{ color: T.faint, fontWeight: 500 }}>{it.unitLabel === 'g' ? `${round(q)} g` : `×${round(q)}`}</span></div>
+                    <div style={{ ...mono, fontSize: 11, color: T.faint }}>{MK.map((k) => `${round(num(it[k]) * q)}${k[0]}`).join('  ')} · {Math.round(calsFrom(it.protein, it.carbs, it.fat) * q)} kcal</div>
+                  </div>
+                  <QtyStepper entry={{ servings: it.qty, unitLabel: it.unitLabel }} onChange={(v) => updPantry(it.id, { qty: v })} />
+                  <button onClick={() => delPantry(it.id)} className="flex items-center justify-center shrink-0 transition" style={{ width: 24, height: 28, color: T.faint }}><X size={14} /></button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <PlanMealPicker open={!!pickerFor} onClose={() => setPickerFor(null)} foods={foods} recipes={recipes} onPick={(item) => { addToPlan(pickerFor, item); }} />
+      <Modal open={genOpen} onClose={() => setGenOpen(false)} title="Generate plan" icon={<Sparkles size={16} style={{ color: T.lime }} />}>
+        <div className="text-xs mb-3" style={{ color: T.muted, lineHeight: 1.5 }}>Builds your meal plan from what's on the grocery list and in the pantry, aiming at your daily targets across {meals.length} meal{meals.length === 1 ? '' : 's'} a day. Ingredients first — the plan comes from the food you'll actually have.</div>
+        <div className="grid grid-cols-2 gap-2 mb-3">
+          <div><Label>Start</Label><input type="date" value={genStart} onChange={(e) => setGenStart(e.target.value)} className="w-full rounded-lg px-2.5 py-1.5 text-sm outline-none mt-1" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono }} /></div>
+          <div><Label>Days</Label><div className="mt-1"><NumField value={genDays} onChange={setGenDays} align="center" /></div></div>
+        </div>
+        {preview && (
+          <div className="rounded-xl p-3 mb-3" style={{ background: T.bg, border: `1px solid ${T.borderHi}` }}>
+            {preview.entries.length === 0 ? (
+              <div className="text-xs" style={{ color: T.faint }}>Nothing to cook with yet — add groceries (or scan some) first.</div>
+            ) : (
+              <>
+                <div className="flex items-center justify-between mb-2">
+                  <Label>Preview</Label>
+                  <span style={{ ...mono, fontSize: 12, color: preview.daysCovered >= num(genDays) ? T.lime : T.orange, fontWeight: 700 }}>covers ~{preview.daysCovered}/{num(genDays) || 7} days</span>
+                </div>
+                <div className="flex flex-col gap-2 mb-1">{MK.map((k) => <MacroBar key={k} k={k} value={preview.planned[k]} goal={preview.target[k]} compact />)}</div>
+                {(preview.shortfall.protein > 0 || preview.shortfall.carbs > 0 || preview.shortfall.fat > 0) && (
+                  <div className="text-xs mt-2" style={{ color: T.orange }}>
+                    Short {MK.filter((k) => preview.shortfall[k] > 0).map((k) => `${Math.round(preview.shortfall[k])}g ${k}`).join(', ')} for the range — worth another store run.
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+        <PrimaryBtn onClick={writePlan} full dim={!preview || !preview.entries.length}><Sparkles size={15} /> Write it to the plan</PrimaryBtn>
+        <div className="text-xs mt-2" style={{ color: T.faint }}>Replaces existing planned meals in the range. Tweak any day afterwards.</div>
       </Modal>
+      {scanOpen && (
+        <Suspense fallback={null}>
+          <Scanner open={scanOpen} onClose={() => setScanOpen(false)} goals={goals} list={[...groceries, ...pantry]} mealsPerDay={meals.length} onAdd={addScanned} onUnknown={onUnknownScan} />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -1455,9 +1597,17 @@ function RecipesModal({ open, onClose, recipes, setRecipes, foods }) {
                 <button onClick={() => setEditing(isEd ? null : r.id)} style={{ color: T.faint, transform: isEd ? 'rotate(180deg)' : 'none' }}><ChevronDown size={16} /></button>
                 <GhostBtn danger onClick={() => del(r.id)}><Trash2 size={14} /></GhostBtn>
               </div>
-              <div className="mt-1.5" style={{ ...mono, fontSize: 11, color: T.faint }}>{MK.map((k) => `${round(m[k])}${k[0]}`).join('  ')} · {Math.round(calsFrom(m.protein, m.carbs, m.fat))} kcal · {(r.items || []).length} items</div>
+              {(() => { const po = Math.max(1, num(r.portions) || 1); return (
+                <div className="mt-1.5" style={{ ...mono, fontSize: 11, color: T.faint }}>
+                  {MK.map((k) => `${round(m[k] / po)}${k[0]}`).join('  ')} · {Math.round(calsFrom(m.protein, m.carbs, m.fat) / po)} kcal{po > 1 ? ' / portion' : ''} · {(r.items || []).length} items{po > 1 ? ` · makes ${po}` : ''}
+                </div>
+              ); })()}
               {isEd && (
                 <div className="mt-2 pt-2" style={{ borderTop: `1px solid ${T.border}` }}>
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-xs" style={{ color: T.muted, fontWeight: 600 }}>Batch — makes how many portions?</span>
+                    <Stepper value={r.portions || 1} onChange={(v) => upd(r.id, { portions: Math.max(1, num(v) || 1) })} min={1} />
+                  </div>
                   {(r.items || []).map((it, idx) => {
                     const fd = foods.find((f) => f.id === it.foodId);
                     return (
@@ -1484,7 +1634,136 @@ function RecipesModal({ open, onClose, recipes, setRecipes, foods }) {
     </Modal>
   );
 }
-function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onExport, onImport, onCopyList, onClearAll, foodCount, recipeCount, logCount }) {
+/* base64url VAPID key → Uint8Array for pushManager.subscribe */
+function urlB64ToUint8(base64String) {
+  const padding = '='.repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  const raw = atob(base64);
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+async function subscribeToPush(meals, nudge) {
+  const pub = import.meta.env.VITE_VAPID_PUBLIC_KEY;
+  if (!pub || !('serviceWorker' in navigator) || !('PushManager' in window)) return { ok: false, why: 'unsupported' };
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(pub) });
+    const res = await fetch('/api/push/subscribe', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sub: sub.toJSON(), meals, nudge, tzOffsetMin: new Date().getTimezoneOffset() }),
+    });
+    return { ok: res.ok, why: res.ok ? '' : `server ${res.status}` };
+  } catch (e) { return { ok: false, why: String(e && e.message || e) }; }
+}
+function MealScheduleModal({ open, onClose, settings, setSettings }) {
+  const meals = settings.meals && settings.meals.length ? settings.meals : DEFAULT_MEALS;
+  const remind = settings.remind || { enabled: false, nudge: true };
+  const [pushState, setPushState] = useState('');
+  const setMeals = (ms) => setSettings((s) => ({ ...s, meals: ms }));
+  const upd = (id, patch) => setMeals(meals.map((m) => (m.id === id ? { ...m, ...patch } : m)));
+  const addMeal = () => { if (meals.length >= 8) return; setMeals([...meals, { id: uid(), label: `Meal ${meals.length + 1}`, time: '15:00' }]); };
+  const removeMeal = (id) => { if (meals.length <= 1) return; setMeals(meals.filter((m) => m.id !== id)); };
+  const setCount = (n) => setMeals(defaultMealsFor(num(n)));
+  const syncPush = async (ms, ndg) => {
+    setPushState('syncing…');
+    const r = await subscribeToPush(ms, ndg);
+    setPushState(r.ok ? 'reminders will also arrive when the app is closed' : 'reminders fire while the app is open (background push not configured)');
+  };
+  const toggleReminders = async () => {
+    if (!remind.enabled) {
+      if (typeof Notification === 'undefined') { setPushState('notifications unsupported on this browser'); return; }
+      const perm = await Notification.requestPermission();
+      if (perm !== 'granted') { setPushState('permission declined — enable notifications in your browser settings'); return; }
+      setSettings((s) => ({ ...s, remind: { ...remind, enabled: true } }));
+      syncPush(meals, remind.nudge);
+    } else {
+      setSettings((s) => ({ ...s, remind: { ...remind, enabled: false } }));
+      setPushState('');
+      try { const reg = await navigator.serviceWorker.ready; const sub = await reg.pushManager.getSubscription(); if (sub) { fetch('/api/push/subscribe', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ endpoint: sub.endpoint }) }).catch(() => {}); sub.unsubscribe(); } } catch {}
+    }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Meals & reminders" icon={<Bell size={16} style={{ color: T.lime }} />}>
+      <div className="flex items-center justify-between mb-2">
+        <Label>Meals per day</Label>
+        <div className="flex items-center gap-2">
+          <Stepper value={meals.length} onChange={(v) => setCount(v)} min={1} />
+        </div>
+      </div>
+      <div className="text-xs mb-3" style={{ color: T.faint }}>Changing the count resets times to an even spread — then adjust each meal below. The schedule drives reminders, the plan generator, and the scanner's per-meal math.</div>
+      <div className="flex flex-col gap-1.5 mb-4">
+        {meals.map((m) => (
+          <div key={m.id} className="flex items-center gap-2">
+            <input value={m.label} onChange={(e) => upd(m.id, { label: e.target.value })} className="flex-1 rounded-lg px-2.5 py-1.5 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, fontWeight: 600, minWidth: 0 }} />
+            <input type="time" value={m.time} onChange={(e) => upd(m.id, { time: e.target.value })} className="rounded-lg px-2 py-1.5 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono }} />
+            <button onClick={() => removeMeal(m.id)} style={{ color: meals.length <= 1 ? T.border : T.faint }}><X size={14} /></button>
+          </div>
+        ))}
+        <button onClick={addMeal} className="rounded-lg py-2 text-xs" style={{ background: 'transparent', border: `1px dashed ${T.borderHi}`, color: T.muted, fontWeight: 600 }}>＋ add a meal</button>
+      </div>
+      <div className="flex flex-col gap-2 mb-4">
+        <div className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+          <div><div className="text-sm" style={{ fontWeight: 600 }}>Meal-time reminders</div><div className="text-xs" style={{ color: T.faint }}>a nudge at each meal time above</div></div>
+          <CheckToggle checked={!!remind.enabled} onToggle={toggleReminders} label="" />
+        </div>
+        <div className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: T.panel2, border: `1px solid ${T.border}`, opacity: remind.enabled ? 1 : 0.5 }}>
+          <div><div className="text-sm" style={{ fontWeight: 600 }}>Missed-meal nudges</div><div className="text-xs" style={{ color: T.faint }}>90 min after a meal time with nothing logged</div></div>
+          <CheckToggle checked={!!remind.nudge} onToggle={() => { const n = { ...remind, nudge: !remind.nudge }; setSettings((s) => ({ ...s, remind: n })); if (remind.enabled) syncPush(meals, n.nudge); }} label="" />
+        </div>
+        {pushState && <div className="text-xs px-1" style={{ color: T.faint }}>{pushState}</div>}
+      </div>
+      <Label style={{ marginBottom: 8 }}>Daily extras</Label>
+      <div className="grid grid-cols-3 gap-2">
+        <div><div className="text-xs mb-1" style={{ color: T.muted, fontWeight: 600 }}>Water (ml)</div><NumField value={settings.waterMl ?? 2000} onChange={(v) => setSettings((s) => ({ ...s, waterMl: num(v) }))} align="center" /></div>
+        <div><div className="text-xs mb-1" style={{ color: T.muted, fontWeight: 600 }}>Fiber (g)</div><NumField value={settings.fiberG ?? 30} onChange={(v) => setSettings((s) => ({ ...s, fiberG: num(v) }))} align="center" /></div>
+        <div><div className="text-xs mb-1" style={{ color: T.muted, fontWeight: 600 }}>Sugar max (g)</div><NumField value={settings.sugarMaxG ?? 50} onChange={(v) => setSettings((s) => ({ ...s, sugarMaxG: num(v) }))} align="center" /></div>
+      </div>
+    </Modal>
+  );
+}
+function ReportsModal({ open, onClose, token, localUnknowns }) {
+  const [rows, setRows] = useState(null);
+  const [err, setErr] = useState('');
+  useEffect(() => {
+    if (!open) return;
+    setRows(null); setErr('');
+    fetch(`/api/report?token=${encodeURIComponent(token)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
+      .then((d) => setRows(Array.isArray(d.reports) ? d.reports : []))
+      .catch((e) => setErr(String(e.message || e)));
+  }, [open, token]);
+  return (
+    <Modal open={open} onClose={onClose} title="Unknown-food reports" icon={<ScanLine size={16} style={{ color: T.orange }} />} maxW={480}>
+      <div className="text-xs mb-3" style={{ color: T.faint }}>Barcodes testers scanned that the app had no knowledge of. Collected from all devices via the API; your own device's log is below it.</div>
+      {err && <div className="text-xs mb-2" style={{ color: T.orange }}>Couldn't reach the API: {err}</div>}
+      {rows === null && !err && <div className="text-xs py-3 text-center" style={{ color: T.faint }}>Loading…</div>}
+      {rows && rows.length === 0 && <div className="text-xs py-3 text-center" style={{ color: T.faint }}>No reports collected yet.</div>}
+      {rows && rows.length > 0 && (
+        <div className="flex flex-col gap-1.5 mb-3">
+          {rows.map((r, i) => (
+            <div key={i} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+              <span style={{ ...mono, fontSize: 12, color: T.text }}>{r.code}</span>
+              <span className="text-xs" style={{ color: T.faint }}>{r.name || '—'} · {r.ts ? new Date(r.ts).toLocaleDateString() : ''}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {localUnknowns.length > 0 && (
+        <>
+          <Label style={{ marginBottom: 6 }}>This device</Label>
+          <div className="flex flex-col gap-1.5">
+            {localUnknowns.slice(0, 20).map((r) => (
+              <div key={r.id} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+                <span style={{ ...mono, fontSize: 12 }}>{r.code}</span>
+                <span className="text-xs" style={{ color: T.faint }}>{fmtDate(r.date)}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, foodCount, recipeCount, logCount }) {
   const [confirm, setConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef(null);
@@ -1501,6 +1780,8 @@ function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onExpo
       <div className="flex flex-col gap-2">
         <Row icon={<BookOpen size={18} />} label="Food library" sub={`${foodCount} saved food${foodCount === 1 ? '' : 's'}`} onClick={onManageLibrary} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<ChefHat size={18} />} label="Recipes" sub={`${recipeCount} recipe${recipeCount === 1 ? '' : 's'}`} onClick={onManageRecipes} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
+        <Row icon={<Bell size={18} />} label="Meals & reminders" sub="Meal count, times, notifications, daily extras" onClick={onManageSchedule} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
+        {hasAdmin && <Row icon={<ScanLine size={18} />} label="Unknown-food reports" sub="Developer — barcodes the app had no knowledge of" onClick={onViewReports} right={<ChevronRight size={16} style={{ color: T.faint }} />} />}
         <Row icon={<Download size={18} />} label="Export all data (JSON)" sub="Download a backup of everything" onClick={onExport} />
         <Row icon={<Upload size={18} />} label="Import data (JSON)" sub="Restore a v1 or v2 backup" onClick={() => fileRef.current && fileRef.current.click()} />
         <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onImport(f); e.target.value = ''; }} />
@@ -1513,7 +1794,12 @@ function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onExpo
 }
 
 /* ---------------- ROOT ---------------- */
-const DEFAULT_SETTINGS = { unit: 'lb', days: 7, goals: { protein: '', carbs: '', fat: '' }, goalMode: 'manual', coach: { goalType: 'cut', rate: 1 }, profile: null };
+const DEFAULT_SETTINGS = {
+  unit: 'lb', days: 7, goals: { protein: '', carbs: '', fat: '' }, goalMode: 'manual',
+  coach: { goalType: 'cut', rate: 1 }, profile: null,
+  meals: DEFAULT_MEALS, remind: { enabled: false, nudge: true },
+  waterMl: 2000, fiberG: 30, sugarMaxG: 50,
+};
 export default function App() {
   const [tab, setTab] = useState('today');
   const [settings, setSettings, sL] = usePersistentState('mf2_settings', DEFAULT_SETTINGS);
@@ -1522,15 +1808,75 @@ export default function App() {
   const [log, setLog, lL] = usePersistentState('mf2_log', []);
   const [plan, setPlan, pL] = usePersistentState('mf2_plan', []);
   const [groceries, setGroceries, gL] = usePersistentState('mf2_groceries', []);
+  const [pantry, setPantry, paL] = usePersistentState('mf2_pantry', []);
+  const [water, setWater, waL] = usePersistentState('mf2_water', []);
+  const [unknownScans, setUnknownScans, uL] = usePersistentState('mf2_unknown', []);
   const [workouts, setWorkouts, wL] = usePersistentState('mf2_workouts', []);
   const [routines, setRoutines, roL] = usePersistentState('mf2_routines', []);
   const [weights, setWeights, weL] = usePersistentState('mf2_weights', []);
   const [migrated, setMigrated, mL] = usePersistentState('mf2_migrated', false);
-  const ready = sL && fL && rL && lL && pL && gL && wL && roL && weL && mL;
+  const ready = sL && fL && rL && lL && pL && gL && paL && waL && uL && wL && roL && weL && mL;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [reportsOpen, setReportsOpen] = useState(false);
+  const [adminToken, setAdminToken] = useState(() => { try { return localStorage.getItem('mf2_adminToken') || ''; } catch { return ''; } });
   const [notice, setNotice] = useState('');
+  const meals = settings.meals && settings.meals.length ? settings.meals : DEFAULT_MEALS;
+  /* developer token arrives via #admin=TOKEN in the URL */
+  useEffect(() => {
+    const m = /^#admin=(.+)$/.exec(window.location.hash || '');
+    if (m) {
+      try { localStorage.setItem('mf2_adminToken', m[1]); } catch {}
+      setAdminToken(m[1]);
+      history.replaceState(null, '', window.location.pathname);
+      setNotice('Developer mode enabled — reports live in Settings.');
+    }
+  }, []);
+  /* local reminders while the app is running (push covers the closed-app case) */
+  useEffect(() => {
+    if (!ready || !settings.remind?.enabled) return;
+    const tick = () => {
+      if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+      const now = new Date();
+      let firedArr = [];
+      try { firedArr = JSON.parse(localStorage.getItem('mf2_fired') || '[]'); } catch {}
+      const today = todayISO();
+      firedArr = firedArr.filter((k) => k.startsWith(today));
+      const fired = new Set(firedArr);
+      const show = (title, body, key) => {
+        fired.add(key);
+        try {
+          navigator.serviceWorker?.getRegistration().then((reg) => {
+            if (reg) reg.showNotification(title, { body, icon: '/pwa-192.png', badge: '/pwa-192.png' });
+            else new Notification(title, { body });
+          });
+        } catch { try { new Notification(title, { body }); } catch {} }
+      };
+      const goals = settings.goals;
+      const goalCals = calsFrom(goals.protein, goals.carbs, goals.fat);
+      const eaten = entryMacros(log.filter((e) => e.date === today));
+      const left = Math.max(0, Math.round(goalCals - calsFrom(eaten.protein, eaten.carbs, eaten.fat)));
+      dueMealReminders({ meals, now, fired }).forEach((m) => {
+        show(`Time for ${m.label}`, goalCals > 0 ? `${left} kcal left today — protein first.` : 'Log it when you eat it.', fireKey(m.id, 'meal', now));
+      });
+      if (settings.remind?.nudge) {
+        const hasLogged = (m) => {
+          const idx = meals.findIndex((x) => x.id === m.id);
+          const slot = slotForMealIndex(idx);
+          return log.some((e) => e.date === today && (e.meal || 'snack') === slot);
+        };
+        dueNudges({ meals, now, fired, hasLogged }).forEach((m) => {
+          show(`${m.label} not logged yet`, 'Even a rough entry beats a blank day.', fireKey(m.id, 'nudge', now));
+        });
+      }
+      try { localStorage.setItem('mf2_fired', JSON.stringify([...fired])); } catch {}
+    };
+    tick();
+    const iv = setInterval(tick, 30000);
+    return () => clearInterval(iv);
+  }, [ready, settings.remind, settings.goals, meals, log]);
   /* one-time v1 → v2 migration */
   useEffect(() => {
     if (!ready || migrated || !storageAvailable) return;
@@ -1555,6 +1901,8 @@ export default function App() {
     if (n.log) setLog(n.log);
     if (n.plan) setPlan(n.plan);
     if (n.groceries) setGroceries(n.groceries);
+    if (n.pantry) setPantry(n.pantry);
+    if (n.water) setWater(n.water);
     if (n.workouts) setWorkouts(n.workouts);
     if (n.routines) setRoutines(n.routines);
     if (n.weights) setWeights(n.weights);
@@ -1569,10 +1917,10 @@ export default function App() {
   };
   const unit = settings.unit || 'lb';
   const setUnit = (u) => setSettings((s) => ({ ...s, unit: u }));
-  const ensureFood = ({ name, category, protein, carbs, fat, unit }) => {
+  const ensureFood = ({ name, category, protein, carbs, fat, fiber, sugar, unit }) => {
     const existing = foods.find((f) => f.name.trim().toLowerCase() === name.trim().toLowerCase());
     if (existing) return existing;
-    const fd = { id: uid(), name: name.trim(), category: category || CATEGORIES[0], protein: num(protein), carbs: num(carbs), fat: num(fat), unit: unit === 'g100' ? 'g100' : 'serving', favorite: false };
+    const fd = { id: uid(), name: name.trim(), category: category || CATEGORIES[0], protein: num(protein), carbs: num(carbs), fat: num(fat), fiber: num(fiber), sugar: num(sugar), unit: unit === 'g100' ? 'g100' : 'serving', favorite: false };
     setFoods((fs) => [fd, ...fs]);
     return fd;
   };
@@ -1586,9 +1934,15 @@ export default function App() {
     while (days.has(d)) { s++; d = addDays(d, -1); }
     return s;
   }, [log]);
+  const swipeRef = useRef(null);
+  /* unknown barcode: keep a local log AND report to the collection API (fire-and-forget) */
+  const recordUnknownScan = (code, name) => {
+    setUnknownScans((u) => [{ id: uid(), code, name: name || '', date: todayISO() }, ...u.filter((x) => x.code !== code)].slice(0, 100));
+    fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, name: name || '', ts: Date.now() }) }).catch(() => {});
+  };
   const exportData = () => {
     try {
-      const blob = new Blob([JSON.stringify({ app: 'MacroForge', version: 3, exportedAt: new Date().toISOString(), settings, foods, recipes, log, plan, groceries, workouts, routines, weights }, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify({ app: 'MacroForge', version: 3, exportedAt: new Date().toISOString(), settings, foods, recipes, log, plan, groceries, pantry, water, workouts, routines, weights }, null, 2)], { type: 'application/json' });
       const url = URL.createObjectURL(blob);
       const a = document.createElement('a'); a.href = url; a.download = `macroforge-${todayISO()}.json`; document.body.appendChild(a); a.click(); a.remove();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
@@ -1598,7 +1952,7 @@ export default function App() {
     const text = groceries.filter((g) => !g.checked).map((g) => `- ${g.name}${g.unitLabel === 'g' ? ` ${round(num(g.qty))}g` : num(g.qty) !== 1 ? ` x${round(num(g.qty))}` : ''}`).join('\n') || '(list empty)';
     try { navigator.clipboard && navigator.clipboard.writeText(text); } catch (e) {}
   };
-  const clearAll = () => { setSettings(DEFAULT_SETTINGS); setFoods([]); setRecipes([]); setLog([]); setPlan([]); setGroceries([]); setWorkouts([]); setRoutines([]); setWeights([]); };
+  const clearAll = () => { setSettings(DEFAULT_SETTINGS); setFoods([]); setRecipes([]); setLog([]); setPlan([]); setGroceries([]); setPantry([]); setWater([]); setUnknownScans([]); setWorkouts([]); setRoutines([]); setWeights([]); };
   const tabs = [
     { id: 'today', label: 'Today', Icon: CalendarDays },
     { id: 'plan', label: 'Plan', Icon: CalendarRange },
@@ -1644,25 +1998,43 @@ export default function App() {
             );
           })}
         </div>
+        <div
+          onTouchStart={(e) => { const t = e.touches[0]; swipeRef.current = { x: t.clientX, y: t.clientY, block: !!e.target.closest('[data-noswipe],input,textarea,select') }; }}
+          onTouchEnd={(e) => {
+            const s = swipeRef.current; swipeRef.current = null;
+            if (!s || s.block) return;
+            const t = e.changedTouches[0];
+            const dx = t.clientX - s.x, dy = t.clientY - s.y;
+            if (Math.abs(dx) < 70 || Math.abs(dx) < 2 * Math.abs(dy)) return;
+            const i = tabs.findIndex((x) => x.id === tab);
+            const next = dx < 0 ? Math.min(tabs.length - 1, i + 1) : Math.max(0, i - 1);
+            if (next !== i) setTab(tabs[next].id);
+          }}
+        >
         {!ready ? (
           <div className="flex items-center justify-center py-20" style={{ color: T.faint }}><div className="text-sm">Loading your data…</div></div>
         ) : tab === 'today' ? (
-          <TodayView settings={settings} log={log} setLog={setLog} foods={foods} recipes={recipes} ensureFood={ensureFood} plan={plan} streak={streak} />
+          <TodayView settings={settings} setSettings={setSettings} log={log} setLog={setLog} foods={foods} recipes={recipes} ensureFood={ensureFood} plan={plan} streak={streak} water={water} setWater={setWater} />
         ) : tab === 'plan' ? (
-          <PlanView settings={settings} setSettings={setSettings} plan={plan} setPlan={setPlan} groceries={groceries} setGroceries={setGroceries} foods={foods} recipes={recipes} ensureFood={ensureFood} log={log} />
+          <PlanView settings={settings} setSettings={setSettings} plan={plan} setPlan={setPlan} groceries={groceries} setGroceries={setGroceries} pantry={pantry} setPantry={setPantry} foods={foods} recipes={recipes} ensureFood={ensureFood} log={log} meals={meals} onUnknownScan={recordUnknownScan} />
         ) : tab === 'train' ? (
           <TrainView workouts={workouts} setWorkouts={setWorkouts} routines={routines} setRoutines={setRoutines} unit={unit} setUnit={setUnit} />
         ) : (
           <CoachView settings={settings} setSettings={setSettings} log={log} workouts={workouts} weights={weights} setWeights={setWeights} />
         )}
+        </div>
       </div>
       <SettingsModal open={settingsOpen} onClose={() => setSettingsOpen(false)}
         onManageLibrary={() => { setSettingsOpen(false); setLibraryOpen(true); }}
         onManageRecipes={() => { setSettingsOpen(false); setRecipesOpen(true); }}
+        onManageSchedule={() => { setSettingsOpen(false); setScheduleOpen(true); }}
+        onViewReports={() => { setSettingsOpen(false); setReportsOpen(true); }} hasAdmin={!!adminToken}
         onExport={exportData} onImport={importFile} onCopyList={copyList} onClearAll={clearAll}
         foodCount={foods.length} recipeCount={recipes.length} logCount={log.length} />
       <LibraryModal open={libraryOpen} onClose={() => setLibraryOpen(false)} foods={foods} addFood={addFood} updFood={updFood} delFood={delFood} />
       <RecipesModal open={recipesOpen} onClose={() => setRecipesOpen(false)} recipes={recipes} setRecipes={setRecipes} foods={foods} />
+      <MealScheduleModal open={scheduleOpen} onClose={() => setScheduleOpen(false)} settings={settings} setSettings={setSettings} />
+      <ReportsModal open={reportsOpen} onClose={() => setReportsOpen(false)} token={adminToken} localUnknowns={unknownScans} />
     </div>
   );
 }

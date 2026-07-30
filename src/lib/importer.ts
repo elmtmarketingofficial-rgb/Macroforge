@@ -12,7 +12,7 @@ export function normalizeImport(data: any): NormalizedImport {
   if (!isV1) {
     const out: NormalizedImport = {};
     if (data.settings) out.settings = data.settings;
-    for (const k of ['foods', 'recipes', 'log', 'plan', 'groceries', 'workouts', 'routines', 'weights'] as const) {
+    for (const k of ['foods', 'recipes', 'log', 'plan', 'groceries', 'pantry', 'water', 'workouts', 'routines', 'weights'] as const) {
       if (Array.isArray(data[k])) out[k] = data[k];
     }
     return out;

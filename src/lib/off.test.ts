@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { mapOffProduct, searchUrl } from './off';
+import { mapOffProduct, searchUrl, barcodeUrl } from './off';
 
 describe('mapOffProduct', () => {
   const chicken = {
     code: '123', product_name: 'Chicken Breast Fillets', brands: 'FreeBird, Other Brand',
-    complete: 1,
-    nutriments: { proteins_100g: 22.5, carbohydrates_100g: 0.3, fat_100g: 2.1 },
+    complete: 1, nova_group: 1, food_groups_tags: ['en:meat'],
+    nutriments: { proteins_100g: 22.5, carbohydrates_100g: 0.3, fat_100g: 2.1, fiber_100g: 0, sugars_100g: 0.2 },
   };
   it('maps per-100g nutriments and first brand', () => {
     const r = mapOffProduct(chicken)!;
@@ -13,6 +13,16 @@ describe('mapOffProduct', () => {
     expect(r.protein).toBe(22.5);
     expect(r.carbs).toBe(0.3);
     expect(r.fat).toBe(2.1);
+  });
+  it('carries nova, food groups, fiber and sugars', () => {
+    const r = mapOffProduct(chicken)!;
+    expect(r.nova).toBe(1);
+    expect(r.groups).toContain('en:meat');
+    expect(r.sugars).toBe(0.2);
+    expect(r.fiber).toBe(0);
+  });
+  it('barcodeUrl targets the v2 product endpoint', () => {
+    expect(barcodeUrl('3017620422003')).toContain('/api/v2/product/3017620422003.json');
   });
   it('unverified when complete !== 1', () => {
     expect(mapOffProduct({ ...chicken, complete: 0 })!.verified).toBe(false);

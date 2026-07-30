@@ -27,16 +27,23 @@ export const entryMacros = (list: LogEntry[]): Macros => list.reduce((a, e) => {
 /* ---- per-100g foods ---- */
 export const isPer100g = (food: any): boolean => !!food && food.unit === 'g100';
 
-export type Portion = Macros & { qty: number; unitLabel: 'g' | null; step: number };
+export type Portion = Macros & { fiber: number; sugar: number; qty: number; unitLabel: 'g' | null; step: number };
 /** How one "unit" of a food is logged. Per-100g foods snapshot per-GRAM macros
  *  with a 100 g default quantity, so entry math (macros × servings) stays uniform
- *  whether servings counts servings or grams. */
-export function foodPortion(food: { protein: any; carbs: any; fat: any; unit?: string }): Portion {
+ *  whether servings counts servings or grams. Fiber/sugar ride along when known. */
+export function foodPortion(food: { protein: any; carbs: any; fat: any; fiber?: any; sugar?: any; sugars?: any; unit?: string }): Portion {
+  const fiber = num(food.fiber), sugar = num(food.sugar ?? food.sugars);
   if (isPer100g(food)) {
-    return { protein: num(food.protein) / 100, carbs: num(food.carbs) / 100, fat: num(food.fat) / 100, qty: 100, unitLabel: 'g', step: 10 };
+    return { protein: num(food.protein) / 100, carbs: num(food.carbs) / 100, fat: num(food.fat) / 100, fiber: fiber / 100, sugar: sugar / 100, qty: 100, unitLabel: 'g', step: 10 };
   }
-  return { protein: num(food.protein), carbs: num(food.carbs), fat: num(food.fat), qty: 1, unitLabel: null, step: 1 };
+  return { protein: num(food.protein), carbs: num(food.carbs), fat: num(food.fat), fiber, sugar, qty: 1, unitLabel: null, step: 1 };
 }
+
+/** Fiber/added-sugar totals across log entries (entries that lack the fields count 0). */
+export const entryExtras = (list: LogEntry[]): { fiber: number; sugar: number } => list.reduce((a, e) => {
+  const q = num(e.servings) || 0;
+  a.fiber += num(e.fiber) * q; a.sugar += num(e.sugar) * q; return a;
+}, { fiber: 0, sugar: 0 });
 
 export const KG = 2.20462;
 export const kcalPerUnit = (unit: Unit): number => (unit === 'kg' ? 7700 : 3500);

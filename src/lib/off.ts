@@ -30,9 +30,19 @@ export function searchUrl(query: string): string {
     + `&search_terms=${encodeURIComponent(query)}`;
 }
 
-export async function searchOff(query: string, signal?: AbortSignal): Promise<OffFood[]> {
-  const res = await fetch(searchUrl(query), { signal, headers: { Accept: 'application/json' } });
-  if (!res.ok) throw new Error(`Open Food Facts returned ${res.status}`);
+/** OFF's search endpoint 503s intermittently — one automatic retry absorbs most of them. */
+export async function searchOff(query: string, signal?: AbortSignal, retries = 1): Promise<OffFood[]> {
+  let res: Response;
+  try {
+    res = await fetch(searchUrl(query), { signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`Open Food Facts returned ${res.status}`);
+  } catch (e: any) {
+    if (retries > 0 && e?.name !== 'AbortError' && !(signal && signal.aborted)) {
+      await new Promise((r) => setTimeout(r, 800));
+      return searchOff(query, signal, retries - 1);
+    }
+    throw e;
+  }
   const data = await res.json();
   const seen = new Set<string>();
   return (Array.isArray(data.products) ? data.products : [])

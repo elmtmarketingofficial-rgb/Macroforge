@@ -3,8 +3,6 @@ import react from '@vitejs/plugin-react';
 import { VitePWA } from 'vite-plugin-pwa';
 
 export default defineConfig({
-  // served from https://<user>.github.io/macroforge/
-  base: '/macroforge/',
   plugins: [
     react(),
     VitePWA({

@@ -18,6 +18,7 @@ import { generatePlan } from '../lib/planner';
 import { remainingGap } from '../lib/pyramid';
 import { DEFAULT_MEALS, defaultMealsFor, dueMealReminders, dueNudges, fireKey, slotForMealIndex } from '../lib/reminders';
 import { makeSyncCode, normSyncCode, threeWayMerge, payloadsEqual, SYNC_STORES } from '../lib/sync';
+import { makeStarterLibrary, STARTER_FOODS, STARTER_RECIPES } from '../lib/starter';
 import { storage } from '../storage';
 
 /* Barcode scanner loads lazily — camera + decoder stay out of the main bundle */
@@ -1971,7 +1972,8 @@ export default function App() {
   const [weights, setWeights, weL] = usePersistentState('mf2_weights', []);
   const [migrated, setMigrated, mL] = usePersistentState('mf2_migrated', false);
   const [syncMeta, setSyncMeta, syL] = usePersistentState('mf2_sync', null); // {code, rev, base, at}
-  const ready = sL && fL && rL && lL && pL && gL && paL && waL && uL && wL && roL && weL && mL && syL;
+  const [seedState, setSeedState, sdL] = usePersistentState('mf2_seed', ''); // '' | 'added' | 'dismissed'
+  const ready = sL && fL && rL && lL && pL && gL && paL && waL && uL && wL && roL && weL && mL && syL && sdL;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
@@ -2093,6 +2095,16 @@ export default function App() {
     return s;
   }, [log]);
   const swipeRef = useRef(null);
+  /* first-run starter pack: an empty library makes a weak first week — offer the
+     curated whole-foods set so planning, predictions, and recipes work day one */
+  const showSeedOffer = ready && !seedState && foods.length === 0 && recipes.length === 0;
+  const addStarterPack = () => {
+    const lib = makeStarterLibrary(uid);
+    setFoods((fs) => [...lib.foods, ...fs]);
+    setRecipes((rs) => [...lib.recipes, ...rs]);
+    setSeedState('added');
+    setNotice(`Starter pack added — ${lib.foods.length} whole foods and ${lib.recipes.length} recipes.`);
+  };
   /* unknown barcode: keep a local log AND report to the collection API (fire-and-forget) */
   const recordUnknownScan = (code, name) => {
     setUnknownScans((u) => [{ id: uid(), code, name: name || '', date: todayISO() }, ...u.filter((x) => x.code !== code)].slice(0, 100));
@@ -2258,6 +2270,21 @@ export default function App() {
             if (next !== i) setTab(tabs[next].id);
           }}
         >
+        {showSeedOffer && (
+          <div className="rounded-2xl px-4 py-3.5 mb-3 fadein" style={{ background: `linear-gradient(135deg, ${T.limeDim}, ${T.panel})`, border: '1px solid rgba(203,255,58,0.35)' }}>
+            <div className="flex items-start gap-2.5">
+              <Sparkles size={16} style={{ color: T.lime, marginTop: 2, flexShrink: 0 }} />
+              <div className="flex-1">
+                <div className="text-sm" style={{ fontWeight: 700 }}>Start with the whole-foods pack?</div>
+                <div className="text-xs mt-0.5" style={{ color: T.muted, lineHeight: 1.5 }}>{STARTER_FOODS.length} staple foods with real macros + {STARTER_RECIPES.length} ready recipes — so your grocery list, meal plans, and scanner have something to cook with on day one. Everything's editable or deletable.</div>
+                <div className="flex gap-2 mt-2.5">
+                  <button onClick={addStarterPack} className="rounded-lg px-3 py-1.5 text-xs" style={{ background: T.lime, color: '#0c0c0e', fontWeight: 800 }}>Add the pack</button>
+                  <button onClick={() => setSeedState('dismissed')} className="rounded-lg px-3 py-1.5 text-xs" style={{ background: 'transparent', border: `1px solid ${T.border}`, color: T.faint, fontWeight: 600 }}>Start empty</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
         {!ready ? (
           <div className="flex items-center justify-center py-20" style={{ color: T.faint }}><div className="text-sm">Loading your data…</div></div>
         ) : tab === 'today' ? (

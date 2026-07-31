@@ -1,5 +1,27 @@
 import { describe, it, expect } from 'vitest';
-import { mapOffProduct, searchUrl, barcodeUrl } from './off';
+import { mapOffProduct, searchUrl, barcodeUrl, normalizeSearchTerm, queryVariants, rankResults } from './off';
+
+describe('search forgiveness', () => {
+  it('strips the classic trailing-e typo after a vowel', () => {
+    expect(normalizeSearchTerm('tomatoe')).toBe('tomato');
+    expect(normalizeSearchTerm('Potatoe')).toBe('potato');
+    expect(normalizeSearchTerm('apple')).toBe('apple');   // consonant + e stays
+    expect(normalizeSearchTerm('cheese')).toBe('cheese');
+  });
+  it('queryVariants covers plurals and the typo', () => {
+    expect(queryVariants('tomatoes')).toContain('tomato');
+    expect(queryVariants('tomatoe')).toContain('tomato');
+    expect(queryVariants('eggs')).toContain('egg');
+    expect(queryVariants('')).toEqual([]);
+  });
+  it('rankResults floats whole-name matches above processed lookalikes', () => {
+    const mk = (name) => ({ name, brand: null, protein: 1, carbs: 5, fat: 0, fiber: 0, sugars: 0, verified: false, code: name, groups: [] });
+    const ranked = rankResults('tomatoe', [mk('Ketchup'), mk('Marinara Sauce'), mk('Diced Tomatoes'), mk('Tomato')]);
+    expect(ranked[0].name).toBe('Tomato');
+    expect(ranked[1].name).toBe('Diced Tomatoes');
+    expect(ranked[3].name).toBe('Marinara Sauce');
+  });
+});
 
 describe('mapOffProduct', () => {
   const chicken = {

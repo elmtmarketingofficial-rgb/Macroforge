@@ -13,7 +13,14 @@ import {
   foodPortion, isPer100g,
 } from '../lib/engine';
 import { normalizeImport } from '../lib/importer';
-import { searchOff } from '../lib/off';
+import { searchOff, queryVariants } from '../lib/off';
+
+/* library matching that forgives plurals and the trailing-e typo (tomatoe → Tomato) */
+const nameMatches = (name, q) => {
+  const n = String(name).toLowerCase();
+  const vs = queryVariants(q);
+  return vs.length === 0 || vs.some((v) => n.includes(v));
+};
 import { generatePlan } from '../lib/planner';
 import { remainingGap } from '../lib/pyramid';
 import { DEFAULT_MEALS, defaultMealsFor, dueMealReminders, dueNudges, fireKey, slotForMealIndex } from '../lib/reminders';
@@ -254,8 +261,7 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
     return out.slice(0, 8);
   }, [log]);
   const matches = useMemo(() => {
-    const term = q.trim().toLowerCase();
-    const list = foods.filter((fd) => fd.name.toLowerCase().includes(term));
+    const list = foods.filter((fd) => nameMatches(fd.name, q));
     return [...list].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0)).slice(0, 30);
   }, [foods, q]);
   const recipeMatches = useMemo(() => recipes.filter((r) => r.name.toLowerCase().includes(q.trim().toLowerCase())), [recipes, q]);
@@ -674,7 +680,7 @@ function AddGrocery({ onAdd, foods, ensureFood }) {
   const [save, setSave] = useState(true);
   const [offSugg, setOffSugg] = useState([]);
   const [added, setAdded] = useState('');
-  const sugg = useMemo(() => { const q = name.trim().toLowerCase(); if (!q) return []; return foods.filter((fd) => fd.name.toLowerCase().includes(q) && fd.name.toLowerCase() !== q).slice(0, 4); }, [foods, name]);
+  const sugg = useMemo(() => { const q = name.trim().toLowerCase(); if (!q) return []; return foods.filter((fd) => nameMatches(fd.name, q) && fd.name.toLowerCase() !== q).slice(0, 4); }, [foods, name]);
   const fill = (fd) => { setName(fd.name); setCat(fd.category || CATEGORIES[0]); setP(String(fd.protein ?? '')); setC(String(fd.carbs ?? '')); setF(String(fd.fat ?? '')); };
   /* predict what's being typed: debounced Open Food Facts lookup (online only) */
   useEffect(() => {
@@ -1783,10 +1789,11 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
 function ReportsModal({ open, onClose, token, localUnknowns }) {
   const [rows, setRows] = useState(null);
   const [signups, setSignups] = useState(null);
+  const [feedback, setFeedback] = useState(null);
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!open) return;
-    setRows(null); setSignups(null); setErr('');
+    setRows(null); setSignups(null); setFeedback(null); setErr('');
     fetch(`/api/report?token=${encodeURIComponent(token)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
       .then((d) => setRows(Array.isArray(d.reports) ? d.reports : []))
@@ -1795,6 +1802,10 @@ function ReportsModal({ open, onClose, token, localUnknowns }) {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
       .then((d) => setSignups(Array.isArray(d.signups) ? d.signups : []))
       .catch(() => setSignups([]));
+    fetch(`/api/feedback?token=${encodeURIComponent(token)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
+      .then((d) => setFeedback(Array.isArray(d.feedback) ? d.feedback : []))
+      .catch(() => setFeedback([]));
   }, [open, token]);
   return (
     <Modal open={open} onClose={onClose} title="Developer" icon={<ScanLine size={16} style={{ color: T.orange }} />} maxW={480}>
@@ -1809,6 +1820,23 @@ function ReportsModal({ open, onClose, token, localUnknowns }) {
                 <div key={i} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
                   <span style={{ ...mono, fontSize: 12, color: T.text }} className="truncate">{s.email}</span>
                   <span className="text-xs shrink-0" style={{ color: T.faint, marginLeft: 8 }}>{s.device || '—'} · {s.ts ? new Date(s.ts).toLocaleDateString() : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      {feedback !== null && (
+        <>
+          <Label style={{ marginBottom: 6 }}>Feedback · {feedback.length}</Label>
+          {feedback.length === 0 ? (
+            <div className="text-xs mb-3" style={{ color: T.faint }}>None yet — the form lives at /join.</div>
+          ) : (
+            <div className="flex flex-col gap-1.5 mb-4">
+              {feedback.map((f, i) => (
+                <div key={i} className="rounded-lg px-3 py-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+                  <div className="text-sm" style={{ color: T.text, whiteSpace: 'pre-wrap' }}>{f.message}</div>
+                  <div className="text-xs mt-1" style={{ color: T.faint }}>{f.email || 'anonymous'} · {f.ts ? new Date(f.ts).toLocaleString() : ''}</div>
                 </div>
               ))}
             </div>

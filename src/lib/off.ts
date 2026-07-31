@@ -41,6 +41,42 @@ export function mapOffProduct(p: any): OffFood | null {
   };
 }
 
+/* ---- query forgiveness ---- */
+/** Strip the classic trailing-e misspelling ("tomatoe" → "tomato") — only when
+ *  the e follows a vowel, so "apple"/"cheese" stay intact. Lowercased + trimmed. */
+export function normalizeSearchTerm(q: string): string {
+  let t = String(q || '').trim().toLowerCase();
+  if (t.length > 4 && t.endsWith('e') && 'aeiou'.includes(t[t.length - 2])) t = t.slice(0, -1);
+  return t;
+}
+
+/** Variants used for matching the local library: as typed, de-pluralized, de-'e'd. */
+export function queryVariants(q: string): string[] {
+  const raw = String(q || '').trim().toLowerCase();
+  if (!raw) return [];
+  const out = new Set<string>([raw]);
+  if (raw.endsWith('es') && raw.length > 4) out.add(raw.slice(0, -2));
+  if (raw.endsWith('s') && raw.length > 3) out.add(raw.slice(0, -1));
+  out.add(normalizeSearchTerm(raw));
+  return [...out].filter(Boolean);
+}
+
+/** Whole-name matches float; processed lookalikes (ketchup for "tomato") sink.
+ *  Stable within each band, so OFF's own relevance is preserved. */
+export function rankResults(term: string, results: OffFood[]): OffFood[] {
+  const t = normalizeSearchTerm(term);
+  if (!t) return results;
+  const band = (r: OffFood) => {
+    const name = r.name.toLowerCase();
+    if (name === t || name === `${t}s` || name === `${t}es`) return 0; // exact
+    if (new RegExp(`\\b${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`).test(name)) return 1; // name contains the word
+    return 2; // brand/ingredient match only (ketchup, marinara…)
+  };
+  return results.map((r, i) => ({ r, i, b: band(r) }))
+    .sort((a, x) => a.b - x.b || a.i - x.i)
+    .map((x) => x.r);
+}
+
 export function searchUrl(query: string): string {
   // world host is the only OFF subdomain with CORS enabled, so filter it to
   // US products in English — unfiltered results come back in any language
@@ -71,9 +107,10 @@ async function offFetch(url: string, signal?: AbortSignal, retries = 2): Promise
 }
 
 export async function searchOff(query: string, signal?: AbortSignal): Promise<OffFood[]> {
-  const data = await offFetch(searchUrl(query), signal);
+  const term = normalizeSearchTerm(query);
+  const data = await offFetch(searchUrl(term), signal);
   const seen = new Set<string>();
-  return (Array.isArray(data.products) ? data.products : [])
+  const results = (Array.isArray(data.products) ? data.products : [])
     .map(mapOffProduct)
     .filter((x: OffFood | null): x is OffFood => !!x)
     .filter((x: OffFood) => {
@@ -81,6 +118,7 @@ export async function searchOff(query: string, signal?: AbortSignal): Promise<Of
       if (seen.has(k)) return false;
       seen.add(k); return true;
     });
+  return rankResults(term, results);
 }
 
 /** Look up a single product by barcode. Resolves null when OFF has no usable

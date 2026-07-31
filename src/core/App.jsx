@@ -5,7 +5,7 @@ import {
   CalendarDays, BarChart3, Settings, Download, Upload, Copy, Trophy,
   Pause, Play, RotateCcw, Search, BookOpen, Utensils, Scale, Zap, Star,
   ChefHat, CalendarRange, Sparkles, ClipboardList, History, ArrowRight,
-  Globe, BadgeCheck, WifiOff, ScanLine, Bell, GlassWater, Package
+  Globe, BadgeCheck, WifiOff, ScanLine, Bell, GlassWater, Package, RefreshCw
 } from 'lucide-react';
 import {
   num, round, calsFrom, e1rm, todayISO, parseISO, addDays, daysBetween, fmtDate,
@@ -17,6 +17,7 @@ import { searchOff } from '../lib/off';
 import { generatePlan } from '../lib/planner';
 import { remainingGap } from '../lib/pyramid';
 import { DEFAULT_MEALS, defaultMealsFor, dueMealReminders, dueNudges, fireKey, slotForMealIndex } from '../lib/reminders';
+import { makeSyncCode, normSyncCode, threeWayMerge, payloadsEqual, SYNC_STORES } from '../lib/sync';
 import { storage } from '../storage';
 
 /* Barcode scanner loads lazily — camera + decoder stay out of the main bundle */
@@ -1778,7 +1779,79 @@ function ReportsModal({ open, onClose, token, localUnknowns }) {
     </Modal>
   );
 }
-function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, foodCount, recipeCount, logCount }) {
+function SyncModal({ open, onClose, meta, status, onCreate, onJoin, onSyncNow, onUnlink, onDeleteRemote }) {
+  const [joinCode, setJoinCode] = useState('');
+  const [joinErr, setJoinErr] = useState('');
+  const [joining, setJoining] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [confirmDel, setConfirmDel] = useState(false);
+  const [qr, setQr] = useState('');
+  useEffect(() => { if (!open) { setJoinCode(''); setJoinErr(''); setCopied(false); setConfirmDel(false); } }, [open]);
+  useEffect(() => {
+    if (!open || !meta?.code) { setQr(''); return; }
+    let alive = true;
+    import('qrcode').then((m) => m.toDataURL(meta.code, { margin: 1, width: 180, color: { dark: '#f3f3f1', light: '#141418' } }))
+      .then((url) => { if (alive) setQr(url); }).catch(() => {});
+    return () => { alive = false; };
+  }, [open, meta?.code]);
+  const join = async () => {
+    if (!joinCode.trim() || joining) return;
+    setJoining(true); setJoinErr('');
+    const err = await onJoin(joinCode);
+    setJoining(false);
+    if (err) setJoinErr(err); else onClose();
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Device sync" icon={<RefreshCw size={16} style={{ color: T.lime }} />}>
+      {!meta?.code ? (
+        <>
+          <div className="text-xs mb-4" style={{ color: T.muted, lineHeight: 1.6 }}>
+            Link your phone and desktop into one account — no email, no password. A private <b style={{ color: T.text }}>sync code</b> is the whole identity: devices holding it share one history, synced through MacroForge's server. Treat the code like a key.
+          </div>
+          <PrimaryBtn onClick={() => { onCreate(); }} full><Sparkles size={15} /> Create my sync code</PrimaryBtn>
+          <div className="flex items-center gap-3 my-4"><div className="flex-1" style={{ height: 1, background: T.border }} /><span className="text-xs" style={{ color: T.faint }}>or link to an existing one</span><div className="flex-1" style={{ height: 1, background: T.border }} /></div>
+          <div className="flex gap-2">
+            <input value={joinCode} onChange={(e) => setJoinCode(e.target.value)} placeholder="ABCD-EFGH-JKMN-PQRS" onKeyDown={(e) => e.key === 'Enter' && join()}
+              className="flex-1 rounded-lg px-3 py-2 text-sm outline-none uppercase" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono, letterSpacing: '0.08em', minWidth: 0 }} />
+            <button onClick={join} disabled={joining} className="rounded-lg px-3.5 text-sm shrink-0" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700, opacity: joining ? 0.6 : 1 }}>{joining ? 'linking…' : 'link'}</button>
+          </div>
+          {joinErr && <div className="text-xs mt-2" style={{ color: T.orange }}>{joinErr}</div>}
+          <div className="text-xs mt-3" style={{ color: T.faint }}>Linking merges this device's history with the account — nothing gets lost.</div>
+        </>
+      ) : (
+        <>
+          <Label style={{ marginBottom: 8 }}>Your sync code</Label>
+          <div className="rounded-xl p-3.5 mb-3 text-center" style={{ background: T.bg, border: `1px solid ${T.borderHi}` }}>
+            <div style={{ ...mono, fontSize: 19, fontWeight: 700, letterSpacing: '0.12em', color: T.lime }}>{meta.code}</div>
+            {qr && <img src={qr} alt="sync code QR" className="mx-auto mt-3 rounded-lg" style={{ width: 150, height: 150 }} />}
+            <button onClick={() => { try { navigator.clipboard.writeText(meta.code); setCopied(true); setTimeout(() => setCopied(false), 1600); } catch {} }}
+              className="mt-3 rounded-lg px-3 py-1.5 text-xs" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: copied ? T.lime : T.muted, fontWeight: 700 }}>
+              {copied ? 'copied!' : 'copy code'}
+            </button>
+          </div>
+          <div className="text-xs mb-3" style={{ color: T.faint, lineHeight: 1.55 }}>
+            Enter this code (or scan the QR with the other device's camera) in <b style={{ color: T.muted }}>Settings → Device sync → link</b> on your other device. Anyone with the code has the data — keep it private.
+          </div>
+          <div className="flex items-center justify-between rounded-xl px-3 py-2.5 mb-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+            <div className="text-xs" style={{ color: status.error ? T.orange : T.muted }}>
+              {status.busy ? 'Syncing…' : status.error ? `Sync issue: ${status.error}` : meta.at ? `Synced ${new Date(meta.at).toLocaleTimeString()} · rev ${meta.rev}` : 'Not synced yet'}
+            </div>
+            <button onClick={onSyncNow} className="rounded-lg px-2.5 py-1 text-xs shrink-0" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700 }}>sync now</button>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => { onUnlink(); onClose(); }} className="flex-1 rounded-lg py-2 text-xs" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.muted, fontWeight: 600 }}>Unlink this device</button>
+            <button onClick={() => { if (confirmDel) { onDeleteRemote(); onClose(); } else { setConfirmDel(true); setTimeout(() => setConfirmDel(false), 3500); } }}
+              className="flex-1 rounded-lg py-2 text-xs" style={{ background: 'transparent', border: '1px solid rgba(255,107,107,0.4)', color: '#ff8a8a', fontWeight: 600 }}>
+              {confirmDel ? 'Tap again — deletes server copy' : 'Delete synced copy'}
+            </button>
+          </div>
+          <div className="text-xs mt-2" style={{ color: T.faint }}>Unlinking or deleting never touches the data already on each device.</div>
+        </>
+      )}
+    </Modal>
+  );
+}
+function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onManageSync, syncLinked, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, foodCount, recipeCount, logCount }) {
   const [confirm, setConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef(null);
@@ -1796,6 +1869,7 @@ function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onMana
         <Row icon={<BookOpen size={18} />} label="Food library" sub={`${foodCount} saved food${foodCount === 1 ? '' : 's'}`} onClick={onManageLibrary} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<ChefHat size={18} />} label="Recipes" sub={`${recipeCount} recipe${recipeCount === 1 ? '' : 's'}`} onClick={onManageRecipes} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<Bell size={18} />} label="Meals & reminders" sub="Meal count, times, notifications, daily extras" onClick={onManageSchedule} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
+        <Row icon={<RefreshCw size={18} />} label="Device sync" sub={syncLinked ? 'Linked — phone & desktop share one history' : 'Local only — link your other devices'} onClick={onManageSync} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         {hasAdmin && <Row icon={<ScanLine size={18} />} label="Unknown-food reports" sub="Developer — barcodes the app had no knowledge of" onClick={onViewReports} right={<ChevronRight size={16} style={{ color: T.faint }} />} />}
         <Row icon={<Download size={18} />} label="Export all data (JSON)" sub="Download a backup of everything" onClick={onExport} />
         <Row icon={<Upload size={18} />} label="Import data (JSON)" sub="Restore a v1 or v2 backup" onClick={() => fileRef.current && fileRef.current.click()} />
@@ -1830,12 +1904,15 @@ export default function App() {
   const [routines, setRoutines, roL] = usePersistentState('mf2_routines', []);
   const [weights, setWeights, weL] = usePersistentState('mf2_weights', []);
   const [migrated, setMigrated, mL] = usePersistentState('mf2_migrated', false);
-  const ready = sL && fL && rL && lL && pL && gL && paL && waL && uL && wL && roL && weL && mL;
+  const [syncMeta, setSyncMeta, syL] = usePersistentState('mf2_sync', null); // {code, rev, base, at}
+  const ready = sL && fL && rL && lL && pL && gL && paL && waL && uL && wL && roL && weL && mL && syL;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
+  const [syncOpen, setSyncOpen] = useState(false);
+  const [syncStatus, setSyncStatus] = useState({ busy: false, error: '' });
   const [adminToken, setAdminToken] = useState(() => { try { return localStorage.getItem('mf2_adminToken') || ''; } catch { return ''; } });
   const [notice, setNotice] = useState('');
   const meals = settings.meals && settings.meals.length ? settings.meals : DEFAULT_MEALS;
@@ -1955,6 +2032,95 @@ export default function App() {
     setUnknownScans((u) => [{ id: uid(), code, name: name || '', date: todayISO() }, ...u.filter((x) => x.code !== code)].slice(0, 100));
     fetch('/api/report', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code, name: name || '', ts: Date.now() }) }).catch(() => {});
   };
+  /* ---------- device sync (sync-code, no accounts) ---------- */
+  const syncPayload = useMemo(() => ({ settings, foods, recipes, log, plan, groceries, pantry, water, workouts, routines, weights }),
+    [settings, foods, recipes, log, plan, groceries, pantry, water, workouts, routines, weights]);
+  const applyPayload = (d) => {
+    if (!d) return;
+    if (d.settings) setSettings({ ...DEFAULT_SETTINGS, ...d.settings });
+    const setters = { foods: setFoods, recipes: setRecipes, log: setLog, plan: setPlan, groceries: setGroceries, pantry: setPantry, water: setWater, workouts: setWorkouts, routines: setRoutines, weights: setWeights };
+    SYNC_STORES.forEach((s) => { if (Array.isArray(d[s])) setters[s](d[s]); });
+  };
+  const syncRef = useRef({});
+  syncRef.current = { meta: syncMeta, payload: syncPayload, ready };
+  const syncBusy = useRef(false);
+  const doSync = async () => {
+    const { meta, payload, ready: ok } = syncRef.current;
+    if (!ok || !meta || !meta.code || syncBusy.current) return;
+    syncBusy.current = true;
+    setSyncStatus({ busy: true, error: '' });
+    try {
+      let rev = meta.rev || 0;
+      let base = meta.base || {};
+      let current = payload;
+      const res = await fetch(`/api/sync?code=${encodeURIComponent(meta.code)}&sinceRev=${rev}`);
+      if (!res.ok) throw new Error(`sync server ${res.status}`);
+      const remote = await res.json();
+      if (remote.rev === 0 && rev > 0) throw new Error('synced copy was deleted on the server');
+      if (!remote.unchanged && remote.rev > rev && remote.data) {
+        const merged = threeWayMerge(base, current, remote.data);
+        applyPayload(merged);
+        current = merged; rev = remote.rev; base = remote.data;
+      }
+      if (!payloadsEqual(current, base)) {
+        const pres = await fetch('/api/sync', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: meta.code, baseRev: rev, data: current }) });
+        if (pres.status === 409) { syncBusy.current = false; setTimeout(doSync, 1200); return; } // raced another device — re-pull & re-merge
+        if (!pres.ok) throw new Error(`sync push ${pres.status}`);
+        const pj = await pres.json();
+        rev = pj.rev; base = current;
+      }
+      setSyncMeta({ code: meta.code, rev, base, at: Date.now() });
+      setSyncStatus({ busy: false, error: '' });
+    } catch (e) {
+      setSyncStatus({ busy: false, error: String((e && e.message) || e) });
+    } finally {
+      syncBusy.current = false;
+    }
+  };
+  useEffect(() => { // pull on load, on returning to the app, and every 45s while open
+    if (!ready || !syncMeta?.code) return;
+    doSync();
+    const iv = setInterval(doSync, 45000);
+    const onVis = () => { if (document.visibilityState === 'visible') doSync(); };
+    document.addEventListener('visibilitychange', onVis);
+    return () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+  }, [ready, syncMeta?.code]);
+  useEffect(() => { // debounced push after local edits settle
+    if (!ready || !syncMeta?.code) return;
+    if (payloadsEqual(syncPayload, syncMeta.base || {})) return;
+    const t = setTimeout(doSync, 4000);
+    return () => clearTimeout(t);
+  }, [syncPayload, ready, syncMeta?.code]);
+  const syncCreate = () => {
+    const code = makeSyncCode();
+    setSyncMeta({ code, rev: 0, base: {}, at: 0 });
+    setTimeout(doSync, 100);
+    return code;
+  };
+  const syncJoin = async (input) => {
+    const code = normSyncCode(input);
+    if (!code) return 'That doesn’t look like a sync code — it’s 16 characters like ABCD-EFGH-JKMN-PQRS.';
+    try {
+      const res = await fetch(`/api/sync?code=${encodeURIComponent(code)}&sinceRev=-1`);
+      if (!res.ok) return `Sync server error (${res.status}) — try again.`;
+      const remote = await res.json();
+      if (!remote.rev || !remote.data) return 'No synced data found for that code — double-check it on the other device.';
+      const merged = threeWayMerge({}, syncRef.current.payload, remote.data);
+      applyPayload(merged);
+      setSyncMeta({ code, rev: remote.rev, base: remote.data, at: Date.now() });
+      setNotice('Devices linked — history merged.');
+      setTimeout(doSync, 600); // push the union back up
+      return null;
+    } catch (e) { return 'Couldn’t reach the sync server — check your connection.'; }
+  };
+  const syncUnlink = () => { setSyncMeta(null); setSyncStatus({ busy: false, error: '' }); };
+  const syncDeleteRemote = async () => {
+    const meta = syncRef.current.meta;
+    if (!meta?.code) return;
+    try { await fetch('/api/sync', { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ code: meta.code }) }); } catch {}
+    syncUnlink();
+    setNotice('Synced copy deleted — data stays on each device.');
+  };
   const exportData = () => {
     try {
       const blob = new Blob([JSON.stringify({ app: 'MacroForge', version: 3, exportedAt: new Date().toISOString(), settings, foods, recipes, log, plan, groceries, pantry, water, workouts, routines, weights }, null, 2)], { type: 'application/json' });
@@ -2043,6 +2209,7 @@ export default function App() {
         onManageLibrary={() => { setSettingsOpen(false); setLibraryOpen(true); }}
         onManageRecipes={() => { setSettingsOpen(false); setRecipesOpen(true); }}
         onManageSchedule={() => { setSettingsOpen(false); setScheduleOpen(true); }}
+        onManageSync={() => { setSettingsOpen(false); setSyncOpen(true); }} syncLinked={!!syncMeta?.code}
         onViewReports={() => { setSettingsOpen(false); setReportsOpen(true); }} hasAdmin={!!adminToken}
         onExport={exportData} onImport={importFile} onCopyList={copyList} onClearAll={clearAll}
         foodCount={foods.length} recipeCount={recipes.length} logCount={log.length} />
@@ -2050,6 +2217,8 @@ export default function App() {
       <RecipesModal open={recipesOpen} onClose={() => setRecipesOpen(false)} recipes={recipes} setRecipes={setRecipes} foods={foods} />
       <MealScheduleModal open={scheduleOpen} onClose={() => setScheduleOpen(false)} settings={settings} setSettings={setSettings} />
       <ReportsModal open={reportsOpen} onClose={() => setReportsOpen(false)} token={adminToken} localUnknowns={unknownScans} />
+      <SyncModal open={syncOpen} onClose={() => setSyncOpen(false)} meta={syncMeta} status={syncStatus}
+        onCreate={syncCreate} onJoin={syncJoin} onSyncNow={doSync} onUnlink={syncUnlink} onDeleteRemote={syncDeleteRemote} />
     </div>
   );
 }

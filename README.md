@@ -35,6 +35,15 @@ move in 10 g increments and grocery lists aggregate in grams. Foods picked from
 the **Search online** tab (Open Food Facts, online only) are saved per-100g
 automatically, with a verified badge on completed OFF entries.
 
+## Device sync
+
+Settings → Device sync creates a private **sync code** (shown as text + QR) —
+no email, no password; the code is the whole identity. Other devices link with
+the code and share one history. Merging is three-way against the last-synced
+snapshot: additions from every device survive, deletions don't resurrect, and
+if the same record was edited on two devices the device you're holding wins.
+Unlinking or deleting the server copy never touches data already on a device.
+
 ## Importing your old data
 
 Settings (gear) → Import data (JSON) accepts both v1 and v2 MacroForge

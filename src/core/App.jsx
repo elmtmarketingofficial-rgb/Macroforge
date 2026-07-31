@@ -1781,17 +1781,40 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
 }
 function ReportsModal({ open, onClose, token, localUnknowns }) {
   const [rows, setRows] = useState(null);
+  const [signups, setSignups] = useState(null);
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!open) return;
-    setRows(null); setErr('');
+    setRows(null); setSignups(null); setErr('');
     fetch(`/api/report?token=${encodeURIComponent(token)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
       .then((d) => setRows(Array.isArray(d.reports) ? d.reports : []))
       .catch((e) => setErr(String(e.message || e)));
+    fetch(`/api/signup?token=${encodeURIComponent(token)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
+      .then((d) => setSignups(Array.isArray(d.signups) ? d.signups : []))
+      .catch(() => setSignups([]));
   }, [open, token]);
   return (
-    <Modal open={open} onClose={onClose} title="Unknown-food reports" icon={<ScanLine size={16} style={{ color: T.orange }} />} maxW={480}>
+    <Modal open={open} onClose={onClose} title="Developer" icon={<ScanLine size={16} style={{ color: T.orange }} />} maxW={480}>
+      {signups !== null && (
+        <>
+          <Label style={{ marginBottom: 6 }}>Beta signups · {signups.length}</Label>
+          {signups.length === 0 ? (
+            <div className="text-xs mb-3" style={{ color: T.faint }}>Nobody yet — share {typeof location !== 'undefined' ? `${location.origin}/join` : '/join'}.</div>
+          ) : (
+            <div className="flex flex-col gap-1.5 mb-4">
+              {signups.map((s, i) => (
+                <div key={i} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+                  <span style={{ ...mono, fontSize: 12, color: T.text }} className="truncate">{s.email}</span>
+                  <span className="text-xs shrink-0" style={{ color: T.faint, marginLeft: 8 }}>{s.device || '—'} · {s.ts ? new Date(s.ts).toLocaleDateString() : ''}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+      <Label style={{ marginBottom: 6 }}>Unknown-food reports</Label>
       <div className="text-xs mb-3" style={{ color: T.faint }}>Barcodes testers scanned that the app had no knowledge of. Collected from all devices via the API; your own device's log is below it.</div>
       {err && <div className="text-xs mb-2" style={{ color: T.orange }}>Couldn't reach the API: {err}</div>}
       {rows === null && !err && <div className="text-xs py-3 text-center" style={{ color: T.faint }}>Loading…</div>}

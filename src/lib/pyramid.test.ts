@@ -62,9 +62,16 @@ describe('scoreScan', () => {
     expect(s.verdict).toBe('poor');
     expect(s.score).toBeLessThanOrEqual(44);
   });
-  it('no macro data → unknown', () => {
-    const s = scoreScan({ item: { protein: 0, carbs: 0, fat: 0 }, goals, list: [] });
-    expect(s.verdict).toBe('unknown');
+  it('water (zero calories) scores great on quality alone', () => {
+    const water = { protein: 0, carbs: 0, fat: 0, offGroups: ['en:spring-water', 'en:beverages'], nova: 1 };
+    const s = scoreScan({ item: water, goals, list: [] });
+    expect(s.verdict).toBe('great');
+    expect(s.reasons.join(' ')).toContain('zero calories');
+  });
+  it('zero-calorie ultra-processed (diet soda) still scores poor', () => {
+    const soda = { protein: 0, carbs: 0, fat: 0, offGroups: ['en:sodas', 'en:beverages'], nova: 4 };
+    const s = scoreScan({ item: soda, goals, list: [] });
+    expect(s.verdict).toBe('poor');
   });
   it('a full list flattens the fit signal and says so', () => {
     const bigList = [{ qty: 100, protein: 20, carbs: 25, fat: 7 }]; // way past weekly need

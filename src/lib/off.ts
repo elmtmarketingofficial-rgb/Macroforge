@@ -14,14 +14,17 @@ export type OffFood = {
 
 const OFF_FIELDS = 'code,product_name,product_name_en,brands,nutriments,complete,nova_group,food_groups_tags,categories_tags';
 
-/** Normalize one OFF product; null when it's unusable (no name or no macro data).
- *  English product name preferred — the app's testers are English speakers. */
+/** Normalize one OFF product; null when it's unusable (no name or no nutrition
+ *  data at all). All-zero macros are VALID — water is real food data, not a
+ *  missing record. English product name preferred. */
+const DATA_KEYS = ['proteins_100g', 'carbohydrates_100g', 'fat_100g', 'energy-kcal_100g', 'energy_100g', 'sugars_100g', 'fiber_100g'];
 export function mapOffProduct(p: any): OffFood | null {
   if (!p || typeof p !== 'object') return null;
   const name = String(p.product_name_en || p.product_name || '').trim();
   const n = p.nutriments || {};
+  const hasData = DATA_KEYS.some((k) => n[k] !== undefined && n[k] !== '');
+  if (!name || !hasData) return null;
   const protein = num(n.proteins_100g), carbs = num(n.carbohydrates_100g), fat = num(n.fat_100g);
-  if (!name || (protein === 0 && carbs === 0 && fat === 0)) return null;
   const brand = String(p.brands || '').split(',')[0].trim();
   const groups = ([] as string[]).concat(
     Array.isArray(p.food_groups_tags) ? p.food_groups_tags : [],

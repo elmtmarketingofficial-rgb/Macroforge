@@ -21,6 +21,7 @@ export const CATEGORY_WEIGHT: Record<string, number> = {
 
 /* Open Food Facts food_groups / categories tags → pyramid weight */
 const OFF_GROUP_WEIGHT: [RegExp, number][] = [
+  [/(spring-water|mineral-water|\bwaters\b|:water\b)/, 0.95], // plain water — before the beverage rule
   [/\b(meat|poultry|fish|seafood|egg)/, 1.0],
   [/(vegetable|fruit|produce|legume|bean|lentil)/, 0.9],
   [/(milk|dairy|dairies|cheese|yogurt|fromage)/, 0.8],
@@ -101,10 +102,20 @@ export function scoreScan({ item, goals, list = [], mealsPerDay = 3, days = 7 }:
   const q = qualityWeight(item);
   reasons.push(...q.reasons);
   const kc = calsFrom(item.protein, item.carbs, item.fat);
-  if (!(kc > 0)) {
-    return { verdict: 'unknown', score: 0, reasons: ['no macro data for this food'], gap: remainingGap(goals, list, days), perMealGap: { protein: 0, carbs: 0, fat: 0 }, mealsCovered: 0 };
-  }
   const gap = remainingGap(goals, list, days);
+  if (kc === 0) {
+    // zero-calorie item (water & co.): judged on pyramid quality alone
+    const slots0 = Math.max(1, days * Math.max(1, mealsPerDay));
+    let score0 = Math.round(100 * (0.55 * q.weight + 0.45 * 0.5));
+    if (q.weight <= 0.25) score0 = Math.min(score0, 44);
+    reasons.push('zero calories — doesn’t move your macros');
+    return {
+      verdict: score0 >= 70 ? 'great' : score0 >= 45 ? 'decent' : 'poor',
+      score: score0, reasons, gap,
+      perMealGap: { protein: gap.protein / slots0, carbs: gap.carbs / slots0, fat: gap.fat / slots0 },
+      mealsCovered: 0,
+    };
+  }
   const slots = Math.max(1, days * Math.max(1, mealsPerDay));
   const perMealGap = { protein: gap.protein / slots, carbs: gap.carbs / slots, fat: gap.fat / slots };
   const goalCals = calsFrom(goals.protein, goals.carbs, goals.fat);

@@ -671,8 +671,30 @@ function AddGrocery({ onAdd, foods, ensureFood }) {
   const [qty, setQty] = useState('1');
   const [p, setP] = useState(''); const [c, setC] = useState(''); const [f, setF] = useState('');
   const [save, setSave] = useState(true);
+  const [offSugg, setOffSugg] = useState([]);
+  const [added, setAdded] = useState('');
   const sugg = useMemo(() => { const q = name.trim().toLowerCase(); if (!q) return []; return foods.filter((fd) => fd.name.toLowerCase().includes(q) && fd.name.toLowerCase() !== q).slice(0, 4); }, [foods, name]);
   const fill = (fd) => { setName(fd.name); setCat(fd.category || CATEGORIES[0]); setP(String(fd.protein ?? '')); setC(String(fd.carbs ?? '')); setF(String(fd.fat ?? '')); };
+  /* predict what's being typed: debounced Open Food Facts lookup (online only) */
+  useEffect(() => {
+    const term = name.trim();
+    setAdded('');
+    if (term.length < 3 || (typeof navigator !== 'undefined' && navigator.onLine === false)) { setOffSugg([]); return; }
+    const ctrl = new AbortController();
+    const t = setTimeout(() => {
+      searchOff(term, ctrl.signal)
+        .then((rs) => setOffSugg(rs.slice(0, 4)))
+        .catch(() => setOffSugg([]));
+    }, 600);
+    return () => { clearTimeout(t); ctrl.abort(); setOffSugg([]); };
+  }, [name]);
+  /* an OFF pick lands directly on the list as a gram-based item with real macros */
+  const addOffPick = (r) => {
+    const label = r.brand && !r.name.toLowerCase().includes(r.brand.toLowerCase()) ? `${r.name} (${r.brand})` : r.name;
+    ensureFood({ name: label, category: cat, protein: r.protein, carbs: r.carbs, fat: r.fat, fiber: r.fiber, sugar: r.sugars, unit: 'g100' });
+    onAdd({ id: uid(), name: label, category: cat, qty: 100, unitLabel: 'g', protein: r.protein / 100, carbs: r.carbs / 100, fat: r.fat / 100, checked: false, source: 'manual' });
+    setAdded(label); setName(''); setP(''); setC(''); setF('');
+  };
   const submit = () => {
     if (!name.trim()) return;
     if (save) ensureFood({ name: name.trim(), category: cat, protein: num(p), carbs: num(c), fat: num(f) });
@@ -690,6 +712,27 @@ function AddGrocery({ onAdd, foods, ensureFood }) {
         {sugg.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {sugg.map((fd) => <Chip key={fd.id} onClick={() => fill(fd)}><BookOpen size={11} style={{ color: T.lime }} /> {fd.name}</Chip>)}
+          </div>
+        )}
+        {added && <div className="flex items-center gap-1.5 text-xs" style={{ color: T.lime }}><Check size={13} /> Added {added} — adjust grams in the list.</div>}
+        {offSugg.length > 0 && (
+          <div>
+            <Label style={{ marginBottom: 6 }}>Matches with real nutrition</Label>
+            <div className="flex flex-col gap-1">
+              {offSugg.map((r) => (
+                <button key={r.code || r.name} onClick={() => addOffPick(r)} className="flex items-center justify-between rounded-lg px-3 py-2 text-left transition"
+                  style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+                  <div className="min-w-0">
+                    <div className="text-sm truncate" style={{ color: T.text, fontWeight: 600 }}>
+                      {r.name}
+                      {r.verified && <span className="inline-flex items-center gap-0.5" style={{ fontSize: 9, color: T.lime, background: T.limeDim, borderRadius: 5, padding: '1px 5px', marginLeft: 6, fontWeight: 700, verticalAlign: 'middle' }}><BadgeCheck size={9} /> VERIFIED</span>}
+                    </div>
+                    <div style={{ ...mono, fontSize: 11, color: T.faint }}>{r.brand ? `${r.brand} · ` : ''}{MK.map((k) => `${round(r[k])}${k[0]}`).join('  ')} · {Math.round(calsFrom(r.protein, r.carbs, r.fat))} kcal / 100 g</div>
+                  </div>
+                  <Plus size={16} style={{ color: T.lime }} />
+                </button>
+              ))}
+            </div>
           </div>
         )}
         <div className="grid grid-cols-4 gap-2">

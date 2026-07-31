@@ -28,11 +28,22 @@ describe('mapOffProduct', () => {
     expect(mapOffProduct({ ...chicken, complete: 0 })!.verified).toBe(false);
     expect(mapOffProduct({ ...chicken, complete: undefined })!.verified).toBe(false);
   });
-  it('rejects products without a name or without any macro data', () => {
+  it('rejects products without a name or without any nutrition data', () => {
     expect(mapOffProduct({ ...chicken, product_name: '' })).toBeNull();
     expect(mapOffProduct({ ...chicken, nutriments: {} })).toBeNull();
     expect(mapOffProduct(null)).toBeNull();
     expect(mapOffProduct('junk')).toBeNull();
+  });
+  it('accepts all-zero macros when nutrition data exists — water is real data', () => {
+    const water = {
+      code: '071142213011', product_name: 'Ozarka Spring Water',
+      nutriments: { 'energy-kcal_100g': 0, proteins_100g: 0, carbohydrates_100g: 0, fat_100g: 0 },
+      food_groups_tags: ['en:waters'],
+    };
+    const r = mapOffProduct(water)!;
+    expect(r).not.toBeNull();
+    expect(r.name).toBe('Ozarka Spring Water');
+    expect(r.protein).toBe(0);
   });
   it('tolerates missing brand and rounds macros', () => {
     const r = mapOffProduct({ product_name: 'Oats', nutriments: { proteins_100g: 13.155, carbohydrates_100g: 67, fat_100g: 6.5 } })!;

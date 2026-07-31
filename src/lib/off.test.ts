@@ -39,12 +39,19 @@ describe('mapOffProduct', () => {
     expect(r.brand).toBeNull();
     expect(r.protein).toBe(13.2);
   });
+  it('prefers the English product name when present', () => {
+    const r = mapOffProduct({ product_name: 'Chocolat en poudre', product_name_en: 'Chocolate powder', nutriments: { proteins_100g: 11, carbohydrates_100g: 11, fat_100g: 3 } })!;
+    expect(r.name).toBe('Chocolate powder');
+  });
 });
 
 describe('searchUrl', () => {
-  it('hits the OFF search endpoint with an encoded query', () => {
+  it('searches the CORS-enabled world host filtered to US products in English', () => {
     const u = searchUrl('greek yogurt 2%');
-    expect(u).toContain('world.openfoodfacts.org');
+    expect(u).toContain('world.openfoodfacts.org'); // only OFF host with CORS
+    expect(u).toContain('tag_0=united-states');
+    expect(u).toContain('lc=en');
+    expect(u).toContain('product_name_en');
     expect(u).toContain('search_terms=greek%20yogurt%202%25');
     expect(u).toContain('json=1');
   });

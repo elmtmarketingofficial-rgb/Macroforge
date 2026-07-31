@@ -12,12 +12,13 @@ export type OffFood = {
   groups: string[];                             // OFF food_groups/categories tags
 };
 
-const OFF_FIELDS = 'code,product_name,brands,nutriments,complete,nova_group,food_groups_tags,categories_tags';
+const OFF_FIELDS = 'code,product_name,product_name_en,brands,nutriments,complete,nova_group,food_groups_tags,categories_tags';
 
-/** Normalize one OFF product; null when it's unusable (no name or no macro data). */
+/** Normalize one OFF product; null when it's unusable (no name or no macro data).
+ *  English product name preferred — the app's testers are English speakers. */
 export function mapOffProduct(p: any): OffFood | null {
   if (!p || typeof p !== 'object') return null;
-  const name = String(p.product_name || '').trim();
+  const name = String(p.product_name_en || p.product_name || '').trim();
   const n = p.nutriments || {};
   const protein = num(n.proteins_100g), carbs = num(n.carbohydrates_100g), fat = num(n.fat_100g);
   if (!name || (protein === 0 && carbs === 0 && fat === 0)) return null;
@@ -38,7 +39,10 @@ export function mapOffProduct(p: any): OffFood | null {
 }
 
 export function searchUrl(query: string): string {
-  return 'https://world.openfoodfacts.org/cgi/search.pl?action=process&json=1&search_simple=1&page_size=20'
+  // world host is the only OFF subdomain with CORS enabled, so filter it to
+  // US products in English — unfiltered results come back in any language
+  return 'https://world.openfoodfacts.org/cgi/search.pl?action=process&json=1&search_simple=1&page_size=20&lc=en'
+    + '&tagtype_0=countries&tag_contains_0=contains&tag_0=united-states'
     + `&fields=${OFF_FIELDS}`
     + `&search_terms=${encodeURIComponent(query)}`;
 }
@@ -47,15 +51,16 @@ export function barcodeUrl(code: string): string {
   return `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(code)}.json?fields=${OFF_FIELDS}`;
 }
 
-/** OFF's endpoints 503 intermittently — one automatic retry absorbs most of them. */
-async function offFetch(url: string, signal?: AbortSignal, retries = 1): Promise<any> {
+/** OFF's endpoints 503 in waves, and their rate-limit block page comes back as
+ *  200 text/html (so json() throws). Both are transient — retry with backoff. */
+async function offFetch(url: string, signal?: AbortSignal, retries = 2): Promise<any> {
   try {
     const res = await fetch(url, { signal, headers: { Accept: 'application/json' } });
     if (!res.ok && res.status !== 404) throw new Error(`Open Food Facts returned ${res.status}`);
-    return await res.json();
+    return await res.json(); // throws on the HTML block page → retried below
   } catch (e: any) {
     if (retries > 0 && e?.name !== 'AbortError' && !(signal && signal.aborted)) {
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, retries === 2 ? 800 : 1800));
       return offFetch(url, signal, retries - 1);
     }
     throw e;

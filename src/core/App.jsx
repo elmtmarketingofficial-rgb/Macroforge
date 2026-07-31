@@ -245,6 +245,7 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
   const [save, setSave] = useState(true);
   const [last, setLast] = useState('');
   const [offState, setOffState] = useState({ status: 'idle', results: [] }); // idle | loading | done | error
+  const [offNonce, setOffNonce] = useState(0); // bump to retry the same query
   const recent = useMemo(() => {
     const seen = new Set(); const out = [];
     [...log].forEach((e) => { const k = e.name.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(e); } });
@@ -261,7 +262,7 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
     onAddCustom({ name: q.trim(), category: cat, protein: num(p), carbs: num(c), fat: num(f), servings: num(serv) || (per100 ? 100 : 1), unit: per100 ? 'g100' : 'serving', saveToLibrary: save });
     setLast(q.trim()); setQ(''); setP(''); setC(''); setF(''); setServ(per100 ? 100 : 1);
   };
-  /* debounced Open Food Facts search */
+  /* debounced Open Food Facts search; offNonce re-runs the same query on demand */
   useEffect(() => {
     if (mode !== 'online') return;
     const term = q.trim();
@@ -275,7 +276,7 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
         .catch((e) => { if (e.name !== 'AbortError') setOffState({ status: 'error', results: [] }); });
     }, 500);
     return () => { clearTimeout(t); ctrl.abort(); };
-  }, [mode, q]);
+  }, [mode, q, offNonce]);
   useEffect(() => { setServ(per100 ? 100 : 1); }, [per100]);
   useEffect(() => { if (!open) { setQ(''); setLast(''); setP(''); setC(''); setF(''); setServ(1); setPer100(false); setMode('foods'); setOffState({ status: 'idle', results: [] }); } }, [open]);
   const offline = typeof navigator !== 'undefined' && navigator.onLine === false;
@@ -315,7 +316,10 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
           ) : offState.status === 'loading' ? (
             <div className="text-xs px-1 py-4 text-center" style={{ color: T.faint }}>Searching Open Food Facts…</div>
           ) : offState.status === 'error' ? (
-            <div className="text-xs px-1 py-4 text-center" style={{ color: T.faint }}>Couldn't reach Open Food Facts. Check your connection and try again.</div>
+            <div className="text-xs px-1 py-4 text-center" style={{ color: T.faint }}>
+              Open Food Facts didn't answer — it gets busy in waves.{' '}
+              <button onClick={() => setOffNonce((n) => n + 1)} style={{ color: T.lime, fontWeight: 700 }}>retry</button>
+            </div>
           ) : offState.status === 'done' && offState.results.length === 0 ? (
             <div className="text-xs px-1 py-4 text-center" style={{ color: T.faint }}>No products with macro data match “{q.trim()}”.</div>
           ) : (
@@ -1658,6 +1662,17 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
   const meals = settings.meals && settings.meals.length ? settings.meals : DEFAULT_MEALS;
   const remind = settings.remind || { enabled: false, nudge: true };
   const [pushState, setPushState] = useState('');
+  /* schedule edits re-sync the server subscription (debounced) so pushes follow the new times */
+  const syncTimer = useRef(null);
+  const mealsKey = JSON.stringify(meals.map((m) => [m.id, m.label, m.time]));
+  const firstSync = useRef(true);
+  useEffect(() => {
+    if (!open || !remind.enabled) { firstSync.current = true; return; }
+    if (firstSync.current) { firstSync.current = false; return; } // skip the on-open render
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => { syncPush(meals, remind.nudge); }, 1200);
+    return () => { if (syncTimer.current) clearTimeout(syncTimer.current); };
+  }, [mealsKey, open]);
   const setMeals = (ms) => setSettings((s) => ({ ...s, meals: ms }));
   const upd = (id, patch) => setMeals(meals.map((m) => (m.id === id ? { ...m, ...patch } : m)));
   const addMeal = () => { if (meals.length >= 8) return; setMeals([...meals, { id: uid(), label: `Meal ${meals.length + 1}`, time: '15:00' }]); };

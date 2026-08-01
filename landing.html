@@ -97,7 +97,6 @@
       </p>
       <div class="cta-row">
         <a class="btn btn-primary" href="#join">Join the beta</a>
-        <a class="btn btn-ghost" href="#feedback">Leave feedback</a>
       </div>
     </div>
 
@@ -167,22 +166,6 @@
       </div>
     </section>
 
-    <section id="feedback">
-      <div class="signup">
-        <h2 class="display">Tell me what you think</h2>
-        <p>Already testing? Found a bug, hit a wall, want something the app doesn't do? It goes straight to the person building it.</p>
-        <form id="fb" novalidate>
-          <textarea id="fb-msg" rows="4" placeholder="What's working? What's broken? What's missing?" style="width:100%;background:var(--panel2);border:1px solid var(--border);border-radius:12px;color:var(--text);padding:13px 14px;font-size:15px;font-family:inherit;outline:none;resize:vertical;"></textarea>
-          <div class="form-row" style="margin-top:10px;">
-            <input id="fb-email" type="email" placeholder="your email (optional, for a reply)" autocomplete="email" />
-            <button class="btn btn-primary" type="submit" id="fb-go">Send feedback</button>
-          </div>
-          <div class="ok" id="fb-ok">Got it — thank you. Every message gets read.</div>
-          <div class="err" id="fb-err">Say a little more than that, then hit send again.</div>
-        </form>
-      </div>
-    </section>
-
     <footer>
       <div>© 2026 MacroForge</div>
       <div>free while in beta</div>
@@ -217,23 +200,6 @@
           chips.forEach(function (x) { x.classList.remove('on'); });
         }).catch(function () { err.style.display = 'block'; })
           .finally(function () { go.disabled = false; go.textContent = 'Count me in'; });
-      });
-      document.getElementById('fb').addEventListener('submit', function (ev) {
-        ev.preventDefault();
-        var msg = document.getElementById('fb-msg').value.trim();
-        var ok = document.getElementById('fb-ok'), err = document.getElementById('fb-err'), go = document.getElementById('fb-go');
-        ok.style.display = 'none'; err.style.display = 'none';
-        if (msg.length < 5) { err.style.display = 'block'; return; }
-        go.disabled = true; go.textContent = 'Sending…';
-        fetch('/api/feedback', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: msg, email: document.getElementById('fb-email').value.trim() })
-        }).then(function (r) {
-          if (!r.ok && r.status !== 202) throw new Error('bad status');
-          ok.style.display = 'block';
-          document.getElementById('fb').reset();
-        }).catch(function () { err.style.display = 'block'; })
-          .finally(function () { go.disabled = false; go.textContent = 'Send feedback'; });
       });
     })();
   </script>

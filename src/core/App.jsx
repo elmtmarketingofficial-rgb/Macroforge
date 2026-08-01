@@ -5,7 +5,7 @@ import {
   CalendarDays, BarChart3, Settings, Download, Upload, Copy, Trophy,
   Pause, Play, RotateCcw, Search, BookOpen, Utensils, Scale, Zap, Star,
   ChefHat, CalendarRange, Sparkles, ClipboardList, History, ArrowRight,
-  Globe, BadgeCheck, WifiOff, ScanLine, Bell, GlassWater, Package, RefreshCw
+  Globe, BadgeCheck, WifiOff, ScanLine, Bell, GlassWater, Package, RefreshCw, MessageSquare
 } from 'lucide-react';
 import {
   num, round, calsFrom, e1rm, todayISO, parseISO, addDays, daysBetween, fmtDate,
@@ -260,10 +260,17 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
     [...log].forEach((e) => { const k = e.name.toLowerCase(); if (!seen.has(k)) { seen.add(k); out.push(e); } });
     return out.slice(0, 8);
   }, [log]);
+  /* meals repeat — foods you log often float to the top of matches */
+  const usage = useMemo(() => {
+    const m = new Map();
+    log.forEach((e) => { const k = String(e.name || '').trim().toLowerCase(); m.set(k, (m.get(k) || 0) + 1); });
+    return m;
+  }, [log]);
   const matches = useMemo(() => {
     const list = foods.filter((fd) => nameMatches(fd.name, q));
-    return [...list].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0)).slice(0, 30);
-  }, [foods, q]);
+    const u = (fd) => usage.get(fd.name.trim().toLowerCase()) || 0;
+    return [...list].sort((a, b) => (b.favorite ? 1 : 0) - (a.favorite ? 1 : 0) || u(b) - u(a)).slice(0, 30);
+  }, [foods, q, usage]);
   const recipeMatches = useMemo(() => recipes.filter((r) => r.name.toLowerCase().includes(q.trim().toLowerCase())), [recipes, q]);
   const addCustom = () => {
     if (!q.trim()) return;
@@ -1946,7 +1953,38 @@ function SyncModal({ open, onClose, meta, status, onCreate, onJoin, onSyncNow, o
     </Modal>
   );
 }
-function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onManageSync, syncLinked, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, foodCount, recipeCount, logCount }) {
+function FeedbackModal({ open, onClose }) {
+  const [msg, setMsg] = useState('');
+  const [email, setEmail] = useState('');
+  const [state, setState] = useState(''); // '' | sending | sent | error
+  useEffect(() => { if (!open) setState(''); }, [open]);
+  const send = async () => {
+    if (msg.trim().length < 5 || state === 'sending') return;
+    setState('sending');
+    try {
+      const r = await fetch('/api/feedback', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg.trim(), email: email.trim() }) });
+      if (!r.ok && r.status !== 202) throw new Error('send failed');
+      setState('sent'); setMsg('');
+    } catch { setState('error'); }
+  };
+  return (
+    <Modal open={open} onClose={onClose} title="Send feedback" icon={<MessageSquare size={16} style={{ color: T.lime }} />}>
+      <div className="text-xs mb-3" style={{ color: T.muted, lineHeight: 1.55 }}>Found a bug, hit a wall, want something the app doesn't do? It goes straight to the person building it — every message gets read.</div>
+      <textarea value={msg} onChange={(e) => setMsg(e.target.value)} rows={4} placeholder="What's working? What's broken? What's missing?"
+        className="w-full rounded-lg px-3 py-2.5 text-sm outline-none transition" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, resize: 'vertical', fontFamily: 'inherit' }}
+        onFocus={(e) => (e.target.style.borderColor = T.lime)} onBlur={(e) => (e.target.style.borderColor = T.border)} />
+      <div className="mt-2 mb-3">
+        <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="your email (optional, for a reply)"
+          className="w-full rounded-lg px-3 py-2 text-sm outline-none transition" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text }}
+          onFocus={(e) => (e.target.style.borderColor = T.lime)} onBlur={(e) => (e.target.style.borderColor = T.border)} />
+      </div>
+      <PrimaryBtn onClick={send} full dim={msg.trim().length < 5}>{state === 'sending' ? 'Sending…' : 'Send it'}</PrimaryBtn>
+      {state === 'sent' && <div className="flex items-center gap-1.5 text-xs mt-2" style={{ color: T.lime }}><Check size={13} /> Got it — thank you.</div>}
+      {state === 'error' && <div className="text-xs mt-2" style={{ color: T.orange }}>Couldn't send — check your connection and try again.</div>}
+    </Modal>
+  );
+}
+function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onManageSync, syncLinked, onSendFeedback, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, foodCount, recipeCount, logCount }) {
   const [confirm, setConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef(null);
@@ -1965,6 +2003,7 @@ function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onMana
         <Row icon={<ChefHat size={18} />} label="Recipes" sub={`${recipeCount} recipe${recipeCount === 1 ? '' : 's'}`} onClick={onManageRecipes} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<Bell size={18} />} label="Meals & reminders" sub="Meal count, times, notifications, daily extras" onClick={onManageSchedule} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<RefreshCw size={18} />} label="Device sync" sub={syncLinked ? 'Linked — phone & desktop share one history' : 'Local only — link your other devices'} onClick={onManageSync} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
+        <Row icon={<MessageSquare size={18} />} label="Send feedback" sub="Bugs, walls, wishes — straight to the builder" onClick={onSendFeedback} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         {hasAdmin && <Row icon={<ScanLine size={18} />} label="Unknown-food reports" sub="Developer — barcodes the app had no knowledge of" onClick={onViewReports} right={<ChevronRight size={16} style={{ color: T.faint }} />} />}
         <Row icon={<Download size={18} />} label="Export all data (JSON)" sub="Download a backup of everything" onClick={onExport} />
         <Row icon={<Upload size={18} />} label="Import data (JSON)" sub="Restore a v1 or v2 backup" onClick={() => fileRef.current && fileRef.current.click()} />
@@ -2008,6 +2047,7 @@ export default function App() {
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [reportsOpen, setReportsOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [syncStatus, setSyncStatus] = useState({ busy: false, error: '' });
   const [adminToken, setAdminToken] = useState(() => { try { return localStorage.getItem('mf2_adminToken') || ''; } catch { return ''; } });
   const [notice, setNotice] = useState('');
@@ -2331,6 +2371,7 @@ export default function App() {
         onManageRecipes={() => { setSettingsOpen(false); setRecipesOpen(true); }}
         onManageSchedule={() => { setSettingsOpen(false); setScheduleOpen(true); }}
         onManageSync={() => { setSettingsOpen(false); setSyncOpen(true); }} syncLinked={!!syncMeta?.code}
+        onSendFeedback={() => { setSettingsOpen(false); setFeedbackOpen(true); }}
         onViewReports={() => { setSettingsOpen(false); setReportsOpen(true); }} hasAdmin={!!adminToken}
         onExport={exportData} onImport={importFile} onCopyList={copyList} onClearAll={clearAll}
         foodCount={foods.length} recipeCount={recipes.length} logCount={log.length} />
@@ -2340,6 +2381,7 @@ export default function App() {
       <ReportsModal open={reportsOpen} onClose={() => setReportsOpen(false)} token={adminToken} localUnknowns={unknownScans} />
       <SyncModal open={syncOpen} onClose={() => setSyncOpen(false)} meta={syncMeta} status={syncStatus}
         onCreate={syncCreate} onJoin={syncJoin} onSyncNow={doSync} onUnlink={syncUnlink} onDeleteRemote={syncDeleteRemote} />
+      <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
     </div>
   );
 }

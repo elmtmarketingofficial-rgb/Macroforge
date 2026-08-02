@@ -82,25 +82,61 @@ export const STARTER_FOODS: StarterFood[] = [
   { name: 'Frozen berries', category: 'Frozen', protein: 0.8, carbs: 12, fat: 0.4, fiber: 3, sugar: 7, unit: 'g100' },
 ];
 
-type StarterRecipe = { name: string; emoji: string; portions: number; items: [string, number][] };
+/* `meals` tags the slots a dish belongs in, so a generated plan doesn't put
+   chicken and rice at 8am. Omit the field to let a recipe land anywhere. */
+type StarterRecipe = { name: string; emoji: string; portions: number; meals?: string[]; items: [string, number][] };
 
 export const STARTER_RECIPES: StarterRecipe[] = [
-  { name: 'Chicken & Rice Bowl', emoji: '🍗', portions: 1, items: [['Chicken breast', 200], ['White rice (cooked)', 250], ['Broccoli', 150], ['Olive oil', 10]] },
-  { name: 'Greek Yogurt Parfait', emoji: '🫐', portions: 1, items: [['Greek yogurt (nonfat)', 250], ['Blueberries', 100], ['Oats (dry)', 30], ['Honey', 15]] },
-  { name: 'Veggie Omelet', emoji: '🍳', portions: 1, items: [['Egg', 3], ['Spinach', 50], ['Cheddar cheese', 30], ['Butter', 10]] },
-  { name: 'Overnight Oats', emoji: '🥣', portions: 1, items: [['Oats (dry)', 60], ['Whole milk', 200], ['Peanut butter', 20], ['Banana', 100]] },
-  { name: 'Salmon Plate', emoji: '🐟', portions: 1, items: [['Salmon', 180], ['Sweet potato', 200], ['Asparagus', 100], ['Olive oil', 8]] },
-  { name: 'Beef Burrito Bowl', emoji: '🌯', portions: 1, items: [['Ground beef 90/10', 150], ['Brown rice (cooked)', 200], ['Black beans (cooked)', 100], ['Avocado', 50]] },
-  { name: 'Protein Shake', emoji: '🥤', portions: 1, items: [['Whey protein (scoop)', 1], ['Whole milk', 300], ['Banana', 100], ['Peanut butter', 15]] },
-  { name: 'Turkey Taco Night', emoji: '🌮', portions: 2, items: [['Ground turkey', 300], ['Flour tortilla', 4], ['Cheddar cheese', 60], ['Bell pepper', 100], ['Onion', 50]] },
+  { name: 'Chicken & Rice Bowl', emoji: '🍗', portions: 1, meals: ['lunch', 'dinner'], items: [['Chicken breast', 200], ['White rice (cooked)', 250], ['Broccoli', 150], ['Olive oil', 10]] },
+  { name: 'Greek Yogurt Parfait', emoji: '🫐', portions: 1, meals: ['breakfast', 'snack'], items: [['Greek yogurt (nonfat)', 250], ['Blueberries', 100], ['Oats (dry)', 30], ['Honey', 15]] },
+  { name: 'Veggie Omelet', emoji: '🍳', portions: 1, meals: ['breakfast'], items: [['Egg', 3], ['Spinach', 50], ['Cheddar cheese', 30], ['Butter', 10]] },
+  { name: 'Overnight Oats', emoji: '🥣', portions: 1, meals: ['breakfast'], items: [['Oats (dry)', 60], ['Whole milk', 200], ['Peanut butter', 20], ['Banana', 100]] },
+  { name: 'Salmon Plate', emoji: '🐟', portions: 1, meals: ['lunch', 'dinner'], items: [['Salmon', 180], ['Sweet potato', 200], ['Asparagus', 100], ['Olive oil', 8]] },
+  { name: 'Beef Burrito Bowl', emoji: '🌯', portions: 1, meals: ['lunch', 'dinner'], items: [['Ground beef 90/10', 150], ['Brown rice (cooked)', 200], ['Black beans (cooked)', 100], ['Avocado', 50]] },
+  { name: 'Chicken Fajita Skillet', emoji: '🫑', portions: 2, meals: ['lunch', 'dinner'], items: [['Chicken thigh', 400], ['Bell pepper', 200], ['Onion', 100], ['Flour tortilla', 4], ['Olive oil', 15]] },
+  { name: 'Steak & Potatoes', emoji: '🥩', portions: 1, meals: ['dinner'], items: [['Sirloin steak', 200], ['White potato', 300], ['Green beans', 150], ['Butter', 10]] },
+  { name: 'Tuna Salad Plate', emoji: '🥗', portions: 1, meals: ['lunch'], items: [['Canned tuna', 150], ['Romaine lettuce', 100], ['Tomato', 100], ['Cucumber', 80], ['Olive oil', 10]] },
+  { name: 'Protein Shake', emoji: '🥤', portions: 1, meals: ['snack', 'breakfast'], items: [['Whey protein (scoop)', 1], ['Whole milk', 300], ['Banana', 100], ['Peanut butter', 15]] },
+  { name: 'Cottage Cheese & Fruit', emoji: '🍓', portions: 1, meals: ['snack', 'breakfast'], items: [['Cottage cheese', 200], ['Strawberries', 100], ['Almonds', 20]] },
+  { name: 'Turkey Taco Night', emoji: '🌮', portions: 2, meals: ['dinner'], items: [['Ground turkey', 300], ['Flour tortilla', 4], ['Cheddar cheese', 60], ['Bell pepper', 100], ['Onion', 50]] },
 ];
+
+/** Bring an early install up to the current pack: add staples it never got
+ *  (the produce aisle arrived late) and backfill meal tags on starter recipes
+ *  so planning stops putting dinners at breakfast. Purely additive — nothing
+ *  the user edited or created is touched. */
+export function upgradeStarterLibrary(
+  foods: any[], recipes: any[], idFn: () => string,
+): { foods: any[]; recipes: any[]; addedFoods: number; taggedRecipes: number } {
+  const key = (n: any) => String(n || '').trim().toLowerCase();
+  const have = new Set(foods.map((f) => key(f.name)));
+  const missing = STARTER_FOODS.filter((f) => !have.has(key(f.name)))
+    .map((f) => ({ id: idFn(), favorite: false, fiber: 0, sugar: 0, ...f }));
+
+  const tagByName = new Map(STARTER_RECIPES.map((r) => [key(r.name), r.meals || []]));
+  let taggedRecipes = 0;
+  const nextRecipes = recipes.map((r) => {
+    if (Array.isArray(r.meals) && r.meals.length) return r;
+    const tags = tagByName.get(key(r.name));
+    if (!tags || !tags.length) return r;
+    taggedRecipes++;
+    return { ...r, meals: tags };
+  });
+
+  return {
+    foods: missing.length ? [...missing, ...foods] : foods,
+    recipes: nextRecipes,
+    addedFoods: missing.length,
+    taggedRecipes,
+  };
+}
 
 /** Materialize the pack with real ids (idFn injected so it's testable). */
 export function makeStarterLibrary(idFn: () => string): { foods: any[]; recipes: any[] } {
   const foods = STARTER_FOODS.map((f) => ({ id: idFn(), favorite: false, fiber: 0, sugar: 0, ...f }));
   const idByName = new Map(foods.map((f) => [f.name, f.id]));
   const recipes = STARTER_RECIPES.map((r) => ({
-    id: idFn(), name: r.name, emoji: r.emoji, portions: r.portions,
+    id: idFn(), name: r.name, emoji: r.emoji, portions: r.portions, meals: r.meals || [],
     items: r.items.map(([name, servings]) => ({ foodId: idByName.get(name), servings })),
   }));
   return { foods, recipes };

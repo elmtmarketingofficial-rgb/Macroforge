@@ -1,6 +1,35 @@
 import { describe, it, expect } from 'vitest';
-import { STARTER_FOODS, STARTER_RECIPES, makeStarterLibrary } from './starter';
+import { STARTER_FOODS, STARTER_RECIPES, makeStarterLibrary, upgradeStarterLibrary } from './starter';
 import { calsFrom } from './engine';
+
+describe('upgradeStarterLibrary', () => {
+  let n = 0;
+  const idFn = () => `u${n++}`;
+  it('adds staples an early install never received', () => {
+    const old = [{ id: 'a', name: 'Chicken breast', protein: 31, carbs: 0, fat: 3.6 }];
+    const up = upgradeStarterLibrary(old, [], idFn);
+    expect(up.addedFoods).toBe(STARTER_FOODS.length - 1);
+    expect(up.foods.some((f) => f.name === 'Tomato')).toBe(true);
+    expect(up.foods.filter((f) => f.name === 'Chicken breast')).toHaveLength(1); // no duplicate
+  });
+  it('backfills meal tags on untagged starter recipes', () => {
+    const untagged = [{ id: 'r1', name: 'Overnight Oats', items: [] }];
+    const up = upgradeStarterLibrary(STARTER_FOODS.map((f, i) => ({ id: `f${i}`, ...f })), untagged, idFn);
+    expect(up.taggedRecipes).toBe(1);
+    expect(up.recipes[0].meals).toEqual(['breakfast']);
+    expect(up.addedFoods).toBe(0);
+  });
+  it("leaves the user's own recipes and existing tags alone", () => {
+    const mine = [
+      { id: 'r1', name: 'Grandma Chili', items: [] },
+      { id: 'r2', name: 'Overnight Oats', meals: ['dinner'], items: [] },
+    ];
+    const up = upgradeStarterLibrary([], mine, idFn);
+    expect(up.recipes[0].meals).toBeUndefined();
+    expect(up.recipes[1].meals).toEqual(['dinner']); // user's choice wins
+    expect(up.taggedRecipes).toBe(0);
+  });
+});
 
 const CATEGORIES = ['Produce', 'Protein', 'Dairy & Eggs', 'Grains', 'Pantry', 'Frozen', 'Snacks', 'Beverages', 'Other'];
 

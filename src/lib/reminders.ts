@@ -2,25 +2,42 @@
    The UI layer decides how to display; the push backend mirrors the same window logic. */
 import { localDate } from './engine';
 
-export type MealTime = { id: string; label: string; time: string }; // time 'HH:MM' local
+/* A meal is a slot in the user's day: where food gets filed AND when to remind.
+   `id` is stable so renaming or reordering never orphans logged entries.
+   `kind` drives recipe matching. A blank `time` means "slot, but no reminder". */
+export type MealTime = { id: string; label: string; time: string; kind?: string; emoji?: string };
 
 export const DEFAULT_MEALS: MealTime[] = [
-  { id: 'm1', label: 'Breakfast', time: '08:00' },
-  { id: 'm2', label: 'Lunch', time: '12:30' },
-  { id: 'm3', label: 'Dinner', time: '18:30' },
+  { id: 'breakfast', label: 'Breakfast', time: '08:00', kind: 'breakfast', emoji: '☀️' },
+  { id: 'lunch', label: 'Lunch', time: '12:30', kind: 'lunch', emoji: '🌤️' },
+  { id: 'dinner', label: 'Dinner', time: '18:30', kind: 'dinner', emoji: '🌙' },
+  { id: 'snack', label: 'Snacks', time: '', kind: 'snack', emoji: '🍎' },
 ];
 
-export function defaultMealsFor(count: number): MealTime[] {
-  const n = Math.max(1, Math.min(8, Math.round(count) || 3));
-  if (n === 3) return DEFAULT_MEALS.map((m) => ({ ...m }));
-  // spread between 08:00 and 20:00
-  const startM = 8 * 60, endM = 20 * 60;
-  return Array.from({ length: n }, (_, i) => {
-    const t = n === 1 ? 12 * 60 : startM + Math.round((i * (endM - startM)) / (n - 1));
-    const hh = String(Math.floor(t / 60)).padStart(2, '0');
-    const mm = String(t % 60).padStart(2, '0');
-    return { id: `m${i + 1}`, label: `Meal ${i + 1}`, time: `${hh}:${mm}` };
-  });
+export const EMOJI_BY_KIND: Record<string, string> = {
+  breakfast: '☀️', lunch: '🌤️', dinner: '🌙', snack: '🍎',
+};
+
+/** Which sort of food belongs at this hour — used when a custom meal is added
+ *  so recipe tags still mean something. */
+export function kindForTime(time: string): string {
+  const m = minutesOf(time);
+  if (m < 0) return 'snack';
+  if (m < 10 * 60 + 30) return 'breakfast';
+  if (m < 15 * 60) return 'lunch';
+  if (m < 21 * 60) return 'dinner';
+  return 'snack';
+}
+
+/** Append a meal without disturbing the ones already there. */
+export function addMeal(meals: MealTime[], idFn: () => string): MealTime[] {
+  if (meals.length >= 8) return meals;
+  const times = meals.map((m) => minutesOf(m.time)).filter((t) => t >= 0);
+  const latest = times.length ? Math.max(...times) : 12 * 60;
+  const t = Math.min(22 * 60, latest + 150);
+  const time = `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+  const kind = kindForTime(time);
+  return [...meals, { id: idFn(), label: `Meal ${meals.length + 1}`, time, kind, emoji: EMOJI_BY_KIND[kind] || '🍽️' }];
 }
 
 export const minutesOf = (hhmm: string): number => {
@@ -63,7 +80,25 @@ export function dueNudges({ meals, now, fired, hasLogged, nudgeAfterMin = 90, wi
   });
 }
 
-/** Map the user's Nth meal onto the app's fixed log slots. */
-export function slotForMealIndex(i: number): 'breakfast' | 'lunch' | 'dinner' | 'snack' {
-  return (['breakfast', 'lunch', 'dinner'] as const)[i] || 'snack';
+/** Bring a stored schedule up to the current shape. Early builds keyed meals
+ *  m1/m2/m3 while the log filed entries under breakfast/lunch/dinner/snack —
+ *  remap onto the canonical ids so nobody's history goes unfiled, keeping the
+ *  labels and times they chose. */
+export function migrateMeals(meals: any): MealTime[] {
+  if (!Array.isArray(meals) || !meals.length) return DEFAULT_MEALS.map((m) => ({ ...m }));
+  // icon follows what the meal IS, not where it sits in the list
+  const withKind = (m: any) => {
+    const kind = m.kind || kindForTime(m.time);
+    return { ...m, kind, emoji: m.emoji || EMOJI_BY_KIND[kind] || '🍽️' };
+  };
+  const isLegacy = meals.every((m: any) => /^m\d+$/.test(String(m && m.id)));
+  if (!isLegacy) return meals.map(withKind);
+  const canonical = ['breakfast', 'lunch', 'dinner'];
+  const out = meals.map((m: any, i: number) => ({ ...withKind(m, i), id: canonical[i] || `meal${i + 1}` }));
+  if (!out.some((m) => m.id === 'snack')) out.push({ ...DEFAULT_MEALS[3] });
+  return out;
 }
+
+/** Planner slots derived from the user's own meals. */
+export const slotsOf = (meals: MealTime[]): { id: string; kind: string }[] =>
+  (meals && meals.length ? meals : DEFAULT_MEALS).map((m) => ({ id: m.id, kind: m.kind || kindForTime(m.time) }));

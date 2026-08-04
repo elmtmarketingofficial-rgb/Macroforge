@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { generatePlan, consumePantry, recipeConsumption, recipeMacrosPerPortion } from './planner';
+import { generatePlan, consumePantry, takeFromPantry, returnToPantry, scaleTaken, reconcileTaken, recipeConsumption, recipeMacrosPerPortion } from './planner';
 import { entryMacros, calsFrom } from './engine';
 import { makeStarterLibrary } from './starter';
 
@@ -172,5 +172,90 @@ describe('consumePantry', () => {
     const out = consumePantry(pantry, [{ name: 'Rice', qty: 2 }, { name: 'Rice', qty: 1 }]);
     expect(out.find((p) => p.id === 'p2')!.qty).toBe(2);
     expect(consumePantry(pantry, [])).toBe(pantry);
+  });
+});
+
+describe('take / return — undoing a log must restore stock exactly', () => {
+  const pantry = [
+    { id: 'p1', name: 'Chicken breast', category: 'Protein', qty: 1000, unitLabel: 'g' as const, protein: 0.31, carbs: 0, fat: 0.036 },
+    { id: 'p2', name: 'Rice', category: 'Grains', qty: 5, unitLabel: null, protein: 4, carbs: 45, fat: 0 },
+  ];
+  let n = 0;
+  const idFn = () => `new${n++}`;
+  it('reports what it actually took', () => {
+    const { pantry: after, taken } = takeFromPantry(pantry, [{ name: 'Chicken breast', qty: 250 }]);
+    expect(after.find((p) => p.id === 'p1')!.qty).toBe(750);
+    expect(taken).toEqual([{ name: 'Chicken breast', qty: 250, category: 'Protein', unitLabel: 'g', protein: 0.31, carbs: 0, fat: 0.036 }]);
+  });
+  it('logging then deleting leaves the pantry exactly as it started', () => {
+    const { pantry: after, taken } = takeFromPantry(pantry, [{ name: 'Chicken breast', qty: 250 }]);
+    const restored = returnToPantry(after, taken, idFn);
+    expect(restored.find((p) => p.name === 'Chicken breast')!.qty).toBe(1000);
+    expect(restored).toHaveLength(2);
+  });
+  it('a row emptied to zero comes back from its snapshot', () => {
+    const { pantry: after, taken } = takeFromPantry(pantry, [{ name: 'Rice', qty: 5 }]);
+    expect(after.find((p) => p.name === 'Rice')).toBeUndefined();
+    const restored = returnToPantry(after, taken, idFn);
+    const rice = restored.find((p) => p.name === 'Rice')!;
+    expect(rice.qty).toBe(5);
+    expect(rice.protein).toBe(4);
+    expect(rice.category).toBe('Grains');
+  });
+  it("never takes more than is there, and never gives back what it didn't take", () => {
+    const { pantry: after, taken } = takeFromPantry(pantry, [{ name: 'Rice', qty: 99 }]);
+    expect(taken[0].qty).toBe(5);                       // only what existed
+    expect(returnToPantry(after, taken, idFn).find((p) => p.name === 'Rice')!.qty).toBe(5);
+  });
+  it('food you never stocked is ignored — eating out cannot create pantry rows', () => {
+    const { pantry: after, taken } = takeFromPantry(pantry, [{ name: 'Restaurant burrito', qty: 1 }]);
+    expect(taken).toEqual([]);
+    expect(returnToPantry(after, taken, idFn)).toHaveLength(2); // nothing invented
+  });
+  it('scaleTaken supports correcting an amount after the fact', () => {
+    const { taken } = takeFromPantry(pantry, [{ name: 'Chicken breast', qty: 200 }]);
+    expect(scaleTaken(taken, 0.5)[0].qty).toBe(100);
+    expect(scaleTaken(taken, 0)).toEqual([]);
+  });
+});
+
+describe('reconcileTaken — correcting an amount settles exactly', () => {
+  const had = [{ name: 'Chicken', qty: 100, category: 'Protein', unitLabel: 'g' as const, protein: 0.31, carbs: 0, fat: 0.036 }];
+  it('raising the amount asks only for the difference', () => {
+    const { take, give, kept } = reconcileTaken(had, [{ name: 'Chicken', qty: 300 }]);
+    expect(take).toEqual([{ name: 'Chicken', qty: 200 }]);
+    expect(give).toEqual([]);
+    expect(kept[0].qty).toBe(100);
+  });
+  it('lowering the amount gives back only the difference', () => {
+    const { take, give, kept } = reconcileTaken(had, [{ name: 'Chicken', qty: 40 }]);
+    expect(take).toEqual([]);
+    expect(give[0].qty).toBe(60);
+    expect(kept[0].qty).toBe(40);
+  });
+  it('zeroing an entry returns everything', () => {
+    const { give, kept } = reconcileTaken(had, []);
+    expect(give[0].qty).toBe(100);
+    expect(kept).toEqual([]);
+  });
+  it('repeated nudges never drift — 300 down to 150 in 15 steps lands exactly', () => {
+    let current = [{ ...had[0], qty: 300 }];
+    let returned = 0;
+    for (let q = 290; q >= 150; q -= 10) {
+      const { give, kept } = reconcileTaken(current, [{ name: 'Chicken', qty: q }]);
+      returned += give.reduce((s, g) => s + g.qty, 0);
+      current = kept;
+    }
+    expect(returned).toBe(150);              // exactly the 150g no longer eaten
+    expect(current[0].qty).toBe(150);
+  });
+  it('handles a recipe touching several ingredients at once', () => {
+    const multi = [
+      { name: 'Oats', qty: 60, protein: 0.132, carbs: 0.67, fat: 0.065 },
+      { name: 'Milk', qty: 200, protein: 0.032, carbs: 0.048, fat: 0.033 },
+    ];
+    const { take, give } = reconcileTaken(multi, [{ name: 'Oats', qty: 120 }, { name: 'Milk', qty: 100 }]);
+    expect(take).toEqual([{ name: 'Oats', qty: 60 }]);
+    expect(give.map((g) => [g.name, g.qty])).toEqual([['Milk', 100]]);
   });
 });

@@ -21,9 +21,9 @@ const nameMatches = (name, q) => {
   const vs = queryVariants(q);
   return vs.length === 0 || vs.some((v) => n.includes(v));
 };
-import { generatePlan, consumePantry, recipeConsumption } from '../lib/planner';
+import { generatePlan, takeFromPantry, returnToPantry, reconcileTaken, recipeConsumption } from '../lib/planner';
 import { remainingGap } from '../lib/pyramid';
-import { DEFAULT_MEALS, defaultMealsFor, dueMealReminders, dueNudges, fireKey, slotForMealIndex } from '../lib/reminders';
+import { DEFAULT_MEALS, addMeal, kindForTime, migrateMeals, minutesOf, slotsOf, dueMealReminders, dueNudges, fireKey } from '../lib/reminders';
 import { makeSyncCode, normSyncCode, threeWayMerge, payloadsEqual, SYNC_STORES } from '../lib/sync';
 import { makeStarterLibrary, upgradeStarterLibrary, STARTER_FOODS, STARTER_RECIPES } from '../lib/starter';
 import { storage } from '../storage';
@@ -51,13 +51,6 @@ const ChartSkeleton = ({ height }) => <div style={{ height }} />;
 
 /* ---------------- constants (theme lives in tokens.js) ---------------- */
 const CATEGORIES = ['Produce','Protein','Dairy & Eggs','Grains','Pantry','Frozen','Snacks','Beverages','Other'];
-const MEALS = [
-  { id: 'breakfast', label: 'Breakfast', emoji: '☀️' },
-  { id: 'lunch',     label: 'Lunch',     emoji: '🌤️' },
-  { id: 'dinner',    label: 'Dinner',    emoji: '🌙' },
-  { id: 'snack',     label: 'Snacks',    emoji: '🍎' },
-];
-const MEAL_IDS = MEALS.map((m) => m.id);
 const ACTIVITY = [
   { id: 1.2,   label: 'Sedentary (desk, little exercise)' },
   { id: 1.375, label: 'Light (1–3 workouts/wk)' },
@@ -68,7 +61,32 @@ const ACTIVITY = [
 
 /* ---------------- helpers ---------------- */
 const uid = () => Math.random().toString(36).slice(2, 8) + Date.now().toString(36).slice(-4);
-const defaultMealNow = () => { const h = new Date().getHours(); return h < 10.5 ? 'breakfast' : h < 15 ? 'lunch' : h < 21 ? 'dinner' : 'snack'; };
+/* the user's own meals are the app's slots — never a hardcoded list */
+const mealsOf = (settings) => (settings?.meals && settings.meals.length ? settings.meals : DEFAULT_MEALS);
+/** Which of the user's meals is happening around now (nearest earlier time). */
+const mealNow = (meals) => {
+  const now = new Date().getHours() * 60 + new Date().getMinutes();
+  let best = null;
+  for (const m of meals) {
+    const t = minutesOf(m.time);
+    if (t < 0 || t > now + 45) continue;                 // a little grace before a meal
+    if (!best || t > minutesOf(best.time)) best = m;
+  }
+  return (best || meals[0] || DEFAULT_MEALS[0]).id;
+};
+/* entries whose slot was deleted still have to show up somewhere */
+const UNFILED = { id: '__unfiled', label: 'Unfiled', emoji: '📋' };
+const groupsOf = (meals, entries) => {
+  const known = new Set(meals.map((m) => m.id));
+  const strays = entries.some((e) => !known.has(e.meal || 'snack'));
+  return strays ? [...meals, UNFILED] : meals;
+};
+const entriesFor = (entries, meals, slotId) => {
+  const known = new Set(meals.map((m) => m.id));
+  return slotId === UNFILED.id
+    ? entries.filter((e) => !known.has(e.meal || 'snack'))
+    : entries.filter((e) => (e.meal || 'snack') === slotId);
+};
 const storageAvailable = true;
 function beep() {
   try {
@@ -244,7 +262,7 @@ const recipeMacros = (recipe, foods) => (recipe.items || []).reduce((a, it) => {
 }, { protein: 0, carbs: 0, fat: 0 });
 
 /* ---------------- TODAY ---------------- */
-function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, onAddRecipe, onAddCustom, onAddOff, dateLabel, meal, setMeal }) {
+function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, onAddRecipe, onAddCustom, onAddOff, dateLabel, meal, setMeal, meals }) {
   const [mode, setMode] = useState('foods'); // foods | recipes | online
   const [q, setQ] = useState('');
   const [cat, setCat] = useState(CATEGORIES[0]);
@@ -299,10 +317,12 @@ function FoodPickerModal({ open, onClose, foods, recipes, log, onAddExisting, on
     <Modal open={open} onClose={onClose} title="Add food" icon={<Utensils size={16} style={{ color: T.lime }} />}>
       <div className="flex items-center justify-between mb-3">
         <div className="text-xs" style={{ color: T.faint }}>Logging to <span style={{ color: T.muted }}>{dateLabel}</span></div>
-        <div className="flex gap-1 rounded-lg p-0.5" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
-          {MEALS.map((m) => (
-            <button key={m.id} onClick={() => setMeal(m.id)} className="rounded-md px-2 py-1 transition" title={m.label}
-              style={{ background: meal === m.id ? T.lime : 'transparent', fontSize: 12 }}>{m.emoji}</button>
+        <div className="flex gap-1 rounded-lg p-0.5 overflow-x-auto" style={{ background: T.panel2, border: `1px solid ${T.border}`, scrollbarWidth: 'none', maxWidth: 190 }}>
+          {meals.map((m) => (
+            <button key={m.id} onClick={() => setMeal(m.id)} className="rounded-md px-2 py-1 transition shrink-0" title={m.label}
+              style={{ background: meal === m.id ? T.lime : 'transparent', fontSize: 12 }}>
+              {m.emoji || m.label.slice(0, 2)}
+            </button>
           ))}
         </div>
       </div>
@@ -461,11 +481,12 @@ function coachSuggestion({ totals, goals, foods }) {
   };
 }
 
-function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureFood, plan, streak, water, setWater, onConsume }) {
+function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureFood, plan, streak, water, setWater, onConsume, onRestore }) {
   const goals = settings.goals;
+  const meals = mealsOf(settings);
   const [viewDate, setViewDate] = useState(todayISO());
   const [picker, setPicker] = useState(false);
-  const [meal, setMeal] = useState(defaultMealNow());
+  const [meal, setMeal] = useState(() => mealNow(meals));
   const isToday = viewDate === todayISO();
   const entries = useMemo(() => log.filter((e) => e.date === viewDate), [log, viewDate]);
   const totals = useMemo(() => entryMacros(entries), [entries]);
@@ -482,22 +503,8 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
   const suggestion = useMemo(() => coachSuggestion({ totals, goals, foods }), [totals, goals, foods]);
   const planned = useMemo(() => plan.filter((e) => e.date === viewDate), [plan, viewDate]);
   const yesterday = useMemo(() => log.filter((e) => e.date === addDays(viewDate, -1)), [log, viewDate]);
-  const updEntry = (id, patch) => setLog((l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
-  const delEntry = (id) => setLog((l) => l.filter((e) => e.id !== id));
-  const addExisting = (fd, servings) => {
-    const per = foodPortion(fd);
-    const qty = servings ?? per.qty;
-    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'food', refId: fd.id, name: fd.name, category: fd.category, servings: qty, unitLabel: per.unitLabel, protein: per.protein, carbs: per.carbs, fat: per.fat, fiber: per.fiber, sugar: per.sugar }, ...l]);
-    onConsume([{ name: fd.name, qty: num(qty) }]);
-  };
-  const addRecipe = (r) => {
-    const m = recipeMacros(r, foods);
-    const portions = Math.max(1, num(r.portions) || 1); // batch recipes log one portion
-    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'recipe', refId: r.id, name: portions > 1 ? `${r.name} (1 of ${portions})` : r.name, servings: 1, protein: m.protein / portions, carbs: m.carbs / portions, fat: m.fat / portions }, ...l]);
-    onConsume(recipeConsumption(r, foods));
-  };
   /* what a set of log/plan entries takes out of the pantry */
-  const consumptionOf = (entries) => entries.flatMap((e) => {
+  const consumptionOf = (list) => list.flatMap((e) => {
     if (e.refType === 'recipe') {
       const r = recipes.find((x) => x.id === e.refId);
       if (r) return recipeConsumption(r, foods).map((n) => ({ ...n, qty: n.qty * (num(e.servings) || 1) }));
@@ -505,6 +512,42 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
     }
     return [{ name: e.name, qty: num(e.servings) }];
   });
+  /* Each entry remembers the stock it actually drew, so corrections are exact:
+     delete puts it all back, editing the amount settles the difference. */
+  const logRef = useRef(log);
+  logRef.current = log;
+  const updEntry = (id, patch) => {
+    const before = logRef.current.find((e) => e.id === id);
+    setLog((l) => l.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    if (!before || patch.servings === undefined) return;
+    if (num(before.servings) === num(patch.servings)) return;
+    const had = before.taken || [];
+    // what this entry ought to be drawing at its new amount
+    const wanted = had.length ? consumptionOf([{ ...before, servings: num(patch.servings) }]) : [];
+    const { take, give, kept } = reconcileTaken(had, wanted);
+    if (give.length) onRestore(give);
+    const got = take.length ? onConsume(take) : [];
+    if (give.length || got.length) {
+      setLog((l) => l.map((e) => (e.id === id ? { ...e, taken: [...kept, ...got] } : e)));
+    }
+  };
+  const delEntry = (id) => {
+    const gone = logRef.current.find((e) => e.id === id);
+    setLog((l) => l.filter((e) => e.id !== id));
+    if (gone && gone.taken && gone.taken.length) onRestore(gone.taken);
+  };
+  const addExisting = (fd, servings) => {
+    const per = foodPortion(fd);
+    const qty = servings ?? per.qty;
+    const taken = onConsume([{ name: fd.name, qty: num(qty) }]);
+    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'food', refId: fd.id, name: fd.name, category: fd.category, servings: qty, unitLabel: per.unitLabel, protein: per.protein, carbs: per.carbs, fat: per.fat, fiber: per.fiber, sugar: per.sugar, taken }, ...l]);
+  };
+  const addRecipe = (r) => {
+    const m = recipeMacros(r, foods);
+    const portions = Math.max(1, num(r.portions) || 1); // batch recipes log one portion
+    const taken = onConsume(recipeConsumption(r, foods));
+    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'recipe', refId: r.id, name: portions > 1 ? `${r.name} (1 of ${portions})` : r.name, servings: 1, protein: m.protein / portions, carbs: m.carbs / portions, fat: m.fat / portions, taken }, ...l]);
+  };
   const addCustom = ({ name, category, protein, carbs, fat, servings, unit, unitLabel, saveToLibrary }) => {
     let foodId = null;
     if (saveToLibrary) { const fd = ensureFood({ name, category, protein, carbs, fat, unit }); foodId = fd.id; }
@@ -513,23 +556,23 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
     const entry = g100
       ? { protein: num(protein) / 100, carbs: num(carbs) / 100, fat: num(fat) / 100, unitLabel: 'g' }
       : { protein: num(protein), carbs: num(carbs), fat: num(fat), unitLabel: unitLabel || null };
-    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: foodId ? 'food' : 'custom', refId: foodId, name, category, servings, ...entry }, ...l]);
-    onConsume([{ name, qty: num(servings) }]);
+    const taken = onConsume([{ name, qty: num(servings) }]);
+    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: foodId ? 'food' : 'custom', refId: foodId, name, category, servings, ...entry, taken }, ...l]);
   };
   const addOff = (r) => {
     const name = r.brand && !r.name.toLowerCase().includes(r.brand.toLowerCase()) ? `${r.name} (${r.brand})` : r.name;
     const fd = ensureFood({ name, category: 'Other', protein: r.protein, carbs: r.carbs, fat: r.fat, fiber: r.fiber, sugar: r.sugars, unit: 'g100' });
     addExisting(fd);
   };
+  /* clone a set of entries onto this day, each carrying its own stock record */
+  const cloneOnto = (src) => src.map((e) => ({ ...e, id: uid(), date: viewDate, taken: onConsume(consumptionOf([e])) }));
   const copyYesterday = () => {
     if (!yesterday.length) return;
-    setLog((l) => [...yesterday.map((e) => ({ ...e, id: uid(), date: viewDate })), ...l]);
-    onConsume(consumptionOf(yesterday));
+    setLog((l) => [...cloneOnto(yesterday), ...l]);
   };
   const eatAsPlanned = () => {
     if (!planned.length) return;
-    setLog((l) => [...planned.map((e) => ({ ...e, id: uid(), date: viewDate })), ...l]);
-    onConsume(consumptionOf(planned));
+    setLog((l) => [...cloneOnto(planned), ...l]);
   };
   const favs = foods.filter((f) => f.favorite).slice(0, 6);
   return (
@@ -601,19 +644,19 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
           <Chip key={fd.id} onClick={() => addExisting(fd)}><Star size={11} style={{ color: T.orange }} fill={T.orange} /> {fd.name}</Chip>
         ))}
       </div>
-      <PrimaryBtn onClick={() => { setMeal(defaultMealNow()); setPicker(true); }} full><Plus size={16} /> Add food</PrimaryBtn>
+      <PrimaryBtn onClick={() => { setMeal(mealNow(meals)); setPicker(true); }} full><Plus size={16} /> Add food</PrimaryBtn>
       {entries.length === 0 ? (
         <EmptyCard Icon={Utensils} text={`Nothing logged ${isToday ? 'today' : 'this day'} yet.`} />
       ) : (
         <div className="flex flex-col gap-2.5">
-          {MEALS.map((m) => {
-            const es = entries.filter((e) => (e.meal || 'snack') === m.id);
+          {groupsOf(meals, entries).map((m) => {
+            const es = entriesFor(entries, meals, m.id);
             if (!es.length) return null;
             const mt = entryMacros(es);
             return (
               <div key={m.id}>
                 <div className="flex items-center justify-between px-1 mb-1.5">
-                  <Label style={{ color: T.muted }}>{m.emoji} {m.label}</Label>
+                  <Label style={{ color: T.muted }}>{m.emoji || '🍽️'} {m.label}</Label>
                   <span style={{ ...mono, fontSize: 11, color: T.faint }}>{Math.round(calsFrom(mt.protein, mt.carbs, mt.fat))} kcal</span>
                 </div>
                 <div className="flex flex-col gap-1.5">
@@ -640,7 +683,7 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
           })}
         </div>
       )}
-      <FoodPickerModal open={picker} onClose={() => setPicker(false)} foods={foods} recipes={recipes} log={log} onAddExisting={addExisting} onAddRecipe={addRecipe} onAddCustom={addCustom} onAddOff={addOff} dateLabel={isToday ? 'today' : fmtDate(viewDate)} meal={meal} setMeal={setMeal} />
+      <FoodPickerModal open={picker} onClose={() => setPicker(false)} foods={foods} recipes={recipes} log={log} onAddExisting={addExisting} onAddRecipe={addRecipe} onAddCustom={addCustom} onAddOff={addOff} dateLabel={isToday ? 'today' : fmtDate(viewDate)} meal={meal} setMeal={setMeal} meals={meals} />
     </div>
   );
 }
@@ -813,8 +856,8 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
   })), [groceries, pantry, foods]);
   const preview = useMemo(() => {
     if (!genOpen || !(goalCals > 0)) return null;
-    return generatePlan({ items: inventory, goals, startDate: genStart, days: Math.max(1, Math.min(14, num(genDays) || 7)), mealsPerDay: meals.length, recipes, foods });
-  }, [genOpen, goalCals, inventory, goals, genStart, genDays, meals.length, recipes, foods]);
+    return generatePlan({ items: inventory, goals, startDate: genStart, days: Math.max(1, Math.min(14, num(genDays) || 7)), slots: slotsOf(meals), recipes, foods });
+  }, [genOpen, goalCals, inventory, goals, genStart, genDays, meals, recipes, foods]);
   const writePlan = () => {
     if (!preview || !preview.entries.length) return;
     const days = Math.max(1, Math.min(14, num(genDays) || 7));
@@ -851,11 +894,13 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
     if (dest === 'pantry') setPantry((ps) => [{ ...row, qty: 100 }, ...ps]);
     else setGroceries((gs) => [row, ...gs]);
   };
-  /* groceries summary */
-  const totals = useMemo(() => groceries.reduce((a, it) => { const q = num(it.qty) || 0; a.protein += num(it.protein) * q; a.carbs += num(it.carbs) * q; a.fat += num(it.fat) * q; return a; }, { protein: 0, carbs: 0, fat: 0 }), [groceries]);
-  const days = Math.max(1, num(settings.days) || 1);
-  const perDay = { protein: totals.protein / days, carbs: totals.carbs / days, fat: totals.fat / days };
-  const totalCals = calsFrom(totals.protein, totals.carbs, totals.fat);
+  /* food on hand — everything you'd cook from, list plus pantry */
+  const onHand = useMemo(() => [...groceries, ...pantry].reduce((a, it) => {
+    const q = num(it.qty) || 0;
+    a.protein += num(it.protein) * q; a.carbs += num(it.carbs) * q; a.fat += num(it.fat) * q; return a;
+  }, { protein: 0, carbs: 0, fat: 0 }), [groceries, pantry]);
+  const onHandCals = calsFrom(onHand.protein, onHand.carbs, onHand.fat);
+  const daysOfFood = goalCals > 0 ? Math.floor(onHandCals / goalCals) : 0;
   const update = (id, patch) => setGroceries((gs) => gs.map((g) => (g.id === id ? { ...g, ...patch } : g)));
   const remove = (id) => setGroceries((gs) => gs.filter((g) => g.id !== id));
   const grouped = useMemo(() => { const map = {}; [...groceries].sort((a, b) => (a.checked === b.checked ? 0 : a.checked ? 1 : -1)).forEach((it) => { (map[it.category] = map[it.category] || []).push(it); }); return CATEGORIES.filter((c) => map[c]).map((c) => [c, map[c]]); }, [groceries]);
@@ -902,12 +947,12 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
           <div className="flex gap-2 mb-2">{MK.map((k) => <div key={k} className="flex-1"><MacroBar k={k} value={dayTotals[k]} goal={num(goals[k])} compact /></div>)}</div>
         )}
         <div className="flex flex-col gap-2 mt-2">
-          {MEALS.map((m) => {
-            const es = dayPlan.filter((e) => e.meal === m.id);
+          {groupsOf(meals, dayPlan).map((m) => {
+            const es = entriesFor(dayPlan, meals, m.id);
             return (
               <div key={m.id} className="rounded-xl p-2.5" style={{ background: T.bg, border: `1px ${es.length ? 'solid' : 'dashed'} ${T.border}` }}>
                 <div className="flex items-center justify-between">
-                  <Label style={{ color: T.muted }}>{m.emoji} {m.label}</Label>
+                  <Label style={{ color: T.muted }}>{m.emoji || '🍽️'} {m.label}</Label>
                   <button onClick={() => setPickerFor(m.id)} className="text-xs" style={{ color: T.lime, fontWeight: 700 }}>＋ add</button>
                 </div>
                 {es.map((e) => (
@@ -930,19 +975,27 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
         )}
       </Card>
       <PrimaryBtn onClick={() => setGenOpen(true)} full><Sparkles size={15} /> Generate plan from groceries</PrimaryBtn>
-      {/* list nutrition */}
-      <Card style={{ background: `linear-gradient(160deg, ${T.panel}, #101013)` }}>
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2"><ShoppingCart size={16} style={{ color: T.lime }} /><Label>List nutrition</Label></div>
-          <div className="flex items-center gap-1.5"><span className="text-xs" style={{ color: T.muted }}>covers</span><div style={{ width: 52 }}><NumField value={settings.days} onChange={(v) => setSettings((g) => ({ ...g, days: v }))} placeholder="7" align="center" /></div><span className="text-xs" style={{ color: T.muted }}>days</span></div>
-        </div>
-        <div className="flex items-end justify-between mb-3">
-          <div><div style={{ ...display, fontSize: 34, color: T.text, lineHeight: 1 }}>{Math.round(totalCals)}</div><div className="text-xs mt-0.5" style={{ color: T.faint }}>total kcal in list</div></div>
-          <div className="text-right"><div style={{ ...mono, fontSize: 18, color: T.lime, fontWeight: 700 }}>{Math.round(totalCals / days)}</div><div className="text-xs" style={{ color: T.faint }}>kcal / day</div></div>
-        </div>
-        <div className="flex flex-col gap-3">{MK.map((k) => <MacroBar key={k} k={k} value={perDay[k]} goal={num(goals[k])} />)}</div>
-        <div className="text-xs mt-3 pt-3" style={{ borderTop: `1px solid ${T.border}`, color: T.faint }}>Bars compare your list's <span style={{ color: T.muted }}>per-day average</span> against your daily targets.</div>
-      </Card>
+      {/* food on hand — one honest number, list + pantry together */}
+      {onHandCals > 0 && (
+        <Card style={{ background: `linear-gradient(160deg, ${T.panel}, #101013)` }}>
+          <div className="flex items-center gap-2 mb-3"><ShoppingCart size={16} style={{ color: T.lime }} /><Label>Food on hand</Label></div>
+          <div className="flex items-end justify-between">
+            <div>
+              <div style={{ ...display, fontSize: 34, color: T.text, lineHeight: 1 }}>{Math.round(onHandCals).toLocaleString()}</div>
+              <div className="text-xs mt-0.5" style={{ color: T.faint }}>kcal across your list and pantry</div>
+            </div>
+            {goalCals > 0 && (
+              <div className="text-right">
+                <div style={{ ...mono, fontSize: 18, color: T.lime, fontWeight: 700 }}>~{daysOfFood}</div>
+                <div className="text-xs" style={{ color: T.faint }}>day{daysOfFood === 1 ? '' : 's'} of eating</div>
+              </div>
+            )}
+          </div>
+          <div className="flex items-center gap-3 mt-3 pt-3" style={{ borderTop: `1px solid ${T.border}`, ...mono, fontSize: 11 }}>
+            {MK.map((k) => <span key={k} style={{ color: MACROS[k].color }}>{Math.round(onHand[k])}g {k}</span>)}
+          </div>
+        </Card>
+      )}
       <AddGrocery onAdd={(item) => setGroceries((gs) => [item, ...gs])} foods={foods} ensureFood={ensureFood} />
       <div className="flex flex-col gap-3">
         <div className="flex items-center justify-between px-1">
@@ -1755,10 +1808,12 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
     return () => { if (syncTimer.current) clearTimeout(syncTimer.current); };
   }, [mealsKey, open]);
   const setMeals = (ms) => setSettings((s) => ({ ...s, meals: ms }));
-  const upd = (id, patch) => setMeals(meals.map((m) => (m.id === id ? { ...m, ...patch } : m)));
-  const addMeal = () => { if (meals.length >= 8) return; setMeals([...meals, { id: uid(), label: `Meal ${meals.length + 1}`, time: '15:00' }]); };
+  /* retiming a meal re-infers what kind of food belongs in it */
+  const upd = (id, patch) => setMeals(meals.map((m) => (m.id === id
+    ? { ...m, ...patch, ...(patch.time !== undefined ? { kind: kindForTime(patch.time) } : {}) }
+    : m)));
+  const addOne = () => setMeals(addMeal(meals, uid));
   const removeMeal = (id) => { if (meals.length <= 1) return; setMeals(meals.filter((m) => m.id !== id)); };
-  const setCount = (n) => setMeals(defaultMealsFor(num(n)));
   const syncPush = async (ms, ndg) => {
     setPushState('syncing…');
     const r = await subscribeToPush(ms, ndg);
@@ -1779,13 +1834,10 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
   };
   return (
     <Modal open={open} onClose={onClose} title="Meals & reminders" icon={<Bell size={16} style={{ color: T.lime }} />}>
-      <div className="flex items-center justify-between mb-2">
-        <Label>Meals per day</Label>
-        <div className="flex items-center gap-2">
-          <Stepper value={meals.length} onChange={(v) => setCount(v)} min={1} />
-        </div>
+      <Label>Your day</Label>
+      <div className="text-xs mb-3 mt-1" style={{ color: T.faint, lineHeight: 1.5 }}>
+        These are the meals you log into, plan around, and get reminded about. Rename them, retime them, add as many as you eat. Leave a time blank for a slot that never nags you.
       </div>
-      <div className="text-xs mb-3" style={{ color: T.faint }}>Changing the count resets times to an even spread — then adjust each meal below. The schedule drives reminders, the plan generator, and the scanner's per-meal math.</div>
       <div className="flex flex-col gap-1.5 mb-4">
         {meals.map((m) => (
           <div key={m.id} className="flex items-center gap-2">
@@ -1794,7 +1846,9 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
             <button onClick={() => removeMeal(m.id)} style={{ color: meals.length <= 1 ? T.border : T.faint }}><X size={14} /></button>
           </div>
         ))}
-        <button onClick={addMeal} className="rounded-lg py-2 text-xs" style={{ background: 'transparent', border: `1px dashed ${T.borderHi}`, color: T.muted, fontWeight: 600 }}>＋ add a meal</button>
+        {meals.length < 8 && (
+          <button onClick={addOne} className="rounded-lg py-2 text-xs" style={{ background: 'transparent', border: `1px dashed ${T.borderHi}`, color: T.muted, fontWeight: 600 }}>＋ add a meal</button>
+        )}
       </div>
       <div className="flex flex-col gap-2 mb-4">
         <div className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
@@ -2236,7 +2290,13 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState({ busy: false, error: '' });
   const [adminToken, setAdminToken] = useState(() => { try { return localStorage.getItem('mf2_adminToken') || ''; } catch { return ''; } });
   const [notice, setNotice] = useState('');
-  const meals = settings.meals && settings.meals.length ? settings.meals : DEFAULT_MEALS;
+  const meals = mealsOf(settings);
+  /* schedules saved by earlier builds used ids the log never referenced */
+  useEffect(() => {
+    if (!ready) return;
+    const fixed = migrateMeals(settings.meals);
+    if (JSON.stringify(fixed) !== JSON.stringify(settings.meals)) setSettings((s) => ({ ...s, meals: fixed }));
+  }, [ready]);
   /* developer token arrives via #admin=TOKEN in the URL */
   useEffect(() => {
     const m = /^#admin=(.+)$/.exec(window.location.hash || '');
@@ -2275,11 +2335,7 @@ export default function App() {
         show(`Time for ${m.label}`, goalCals > 0 ? `${left} kcal left today — protein first.` : 'Log it when you eat it.', fireKey(m.id, 'meal', now));
       });
       if (settings.remind?.nudge) {
-        const hasLogged = (m) => {
-          const idx = meals.findIndex((x) => x.id === m.id);
-          const slot = slotForMealIndex(idx);
-          return log.some((e) => e.date === today && (e.meal || 'snack') === slot);
-        };
+        const hasLogged = (m) => log.some((e) => e.date === today && (e.meal || 'snack') === m.id);
         dueNudges({ meals, now, fired, hasLogged }).forEach((m) => {
           show(`${m.label} not logged yet`, 'Even a rough entry beats a blank day.', fireKey(m.id, 'nudge', now));
         });
@@ -2379,10 +2435,22 @@ export default function App() {
       setNotice(`Library updated — ${up.addedFoods} foods added, ${up.taggedRecipes} recipes now know their meal times.`);
     }
   }, [ready, seedState, seedVersion]);
-  /* eating draws stock down, so the pantry keeps telling the truth week to week */
-  const depletePantry = (consumptions) => {
-    if (!consumptions || !consumptions.length) return;
-    setPantry((ps) => consumePantry(ps, consumptions));
+  /* Eating draws stock down and corrections put it back, so the pantry keeps
+     telling the truth. A ref mirrors state so consecutive edits in one tick
+     settle against fresh numbers, and callers get the exact record back. */
+  const pantryRef = useRef(pantry);
+  pantryRef.current = pantry;
+  const takeStock = (consumptions) => {
+    if (!consumptions || !consumptions.length) return [];
+    const { pantry: next, taken } = takeFromPantry(pantryRef.current, consumptions);
+    if (taken.length) { pantryRef.current = next; setPantry(next); }
+    return taken;
+  };
+  const giveStock = (taken) => {
+    if (!taken || !taken.length) return;
+    const next = returnToPantry(pantryRef.current, taken, uid);
+    pantryRef.current = next;
+    setPantry(next);
   };
   /* unknown barcode: keep a local log AND report to the collection API (fire-and-forget) */
   const recordUnknownScan = (code, name) => {
@@ -2556,7 +2624,7 @@ export default function App() {
         {!ready ? (
           <div className="flex items-center justify-center py-20" style={{ color: T.faint }}><div className="text-sm">Loading your data…</div></div>
         ) : tab === 'today' ? (
-          <TodayView settings={settings} setSettings={setSettings} log={log} setLog={setLog} foods={foods} recipes={recipes} ensureFood={ensureFood} plan={plan} streak={streak} water={water} setWater={setWater} onConsume={depletePantry} />
+          <TodayView settings={settings} setSettings={setSettings} log={log} setLog={setLog} foods={foods} recipes={recipes} ensureFood={ensureFood} plan={plan} streak={streak} water={water} setWater={setWater} onConsume={takeStock} onRestore={giveStock} />
         ) : tab === 'plan' ? (
           <PlanView settings={settings} setSettings={setSettings} plan={plan} setPlan={setPlan} groceries={groceries} setGroceries={setGroceries} pantry={pantry} setPantry={setPantry} foods={foods} recipes={recipes} ensureFood={ensureFood} log={log} meals={meals} onUnknownScan={recordUnknownScan} />
         ) : tab === 'train' ? (

@@ -34,8 +34,19 @@ export type PlanResult = {
   daysCovered: number;
 };
 
-const SLOT_IDS = ['breakfast', 'lunch', 'dinner'];
-const slotFor = (mealIndex: number): string => SLOT_IDS[mealIndex] || 'snack';
+/* A slot is one meal in the user's day. `id` is where entries get filed;
+   `kind` (breakfast/lunch/dinner/snack) is what recipe tags match against, so
+   a custom "Second lunch" still attracts lunch food. */
+export type Slot = { id: string; kind: string };
+const DEFAULT_SLOTS: Slot[] = [
+  { id: 'breakfast', kind: 'breakfast' }, { id: 'lunch', kind: 'lunch' },
+  { id: 'dinner', kind: 'dinner' }, { id: 'snack', kind: 'snack' },
+];
+const slotsFrom = (mealsPerDay: any, slots?: Slot[]): Slot[] => {
+  if (slots && slots.length) return slots.slice(0, 8);
+  const n = Math.max(1, Math.min(8, Math.round(num(mealsPerDay)) || 3));
+  return Array.from({ length: n }, (_, i) => DEFAULT_SLOTS[i] || DEFAULT_SLOTS[3]);
+};
 const key = (name: any) => String(name || '').trim().toLowerCase();
 
 const MKEYS: (keyof Macros)[] = ['protein', 'carbs', 'fat'];
@@ -66,27 +77,113 @@ export function recipeMacrosPerPortion(recipe: PlannerRecipe, foods: PlannerFood
   return { protein: total.protein / portions, carbs: total.carbs / portions, fat: total.fat / portions };
 }
 
-/** Subtract what was eaten from the pantry. Unknown items are ignored, rows
- *  that hit zero drop out, and nothing ever goes negative. */
-export function consumePantry<T extends { name: string; qty: any }>(pantry: T[], consumptions: Consumption[]): T[] {
-  if (!consumptions.length) return pantry;
+/** A record of stock actually removed — enough to put it back exactly,
+ *  including rows that were emptied and dropped. */
+export type Taken = {
+  name: string; qty: number;
+  category?: string; unitLabel?: 'g' | null;
+  protein: number; carbs: number; fat: number;
+};
+
+/** Subtract what was eaten from the pantry, reporting what was genuinely
+ *  taken. Food you don't stock is ignored (eating out doesn't touch the
+ *  pantry), rows that hit zero drop out, nothing goes negative. */
+export function takeFromPantry<T extends { name: string; qty: any }>(
+  pantry: T[], consumptions: Consumption[],
+): { pantry: T[]; taken: Taken[] } {
+  if (!consumptions.length) return { pantry, taken: [] };
   const want = new Map<string, number>();
   consumptions.forEach((c) => {
     const k = key(c.name); const q = num(c.qty);
     if (!k || !(q > 0)) return;
     want.set(k, (want.get(k) || 0) + q);
   });
-  if (!want.size) return pantry;
+  if (!want.size) return { pantry, taken: [] };
   const out: T[] = [];
+  const taken: Taken[] = [];
   for (const row of pantry) {
     const k = key(row.name);
-    const take = want.get(k);
-    if (take == null) { out.push(row); continue; }
-    const left = round(num(row.qty) - take);
+    const ask = want.get(k);
+    if (ask == null) { out.push(row); continue; }
     want.delete(k);
+    const have = num(row.qty);
+    const got = Math.min(have, ask);            // never take more than is there
+    const r = row as any;
+    if (got > 0) {
+      taken.push({
+        name: row.name, qty: round(got), category: r.category,
+        unitLabel: r.unitLabel || null,
+        protein: num(r.protein), carbs: num(r.carbs), fat: num(r.fat),
+      });
+    }
+    const left = round(have - got);
     if (left > 0.0001) out.push({ ...row, qty: left });
   }
-  return out;
+  return { pantry: out, taken };
+}
+
+/** Put stock back — only ever what `takeFromPantry` reported removing, so an
+ *  undo can't invent food. Emptied rows are recreated from their snapshot. */
+export function returnToPantry<T extends { name: string; qty: any }>(
+  pantry: T[], taken: Taken[], idFn: () => string,
+): T[] {
+  if (!taken || !taken.length) return pantry;
+  const out = pantry.map((r) => ({ ...r }));
+  for (const t of taken) {
+    const q = num(t.qty);
+    if (!(q > 0)) continue;
+    const row = out.find((r) => key(r.name) === key(t.name));
+    if (row) row.qty = round(num(row.qty) + q);
+    else out.push({
+      id: idFn(), name: t.name, category: t.category || 'Other',
+      qty: round(q), unitLabel: t.unitLabel || null,
+      protein: num(t.protein), carbs: num(t.carbs), fat: num(t.fat),
+    } as any);
+  }
+  return out as T[];
+}
+
+/** Scale a taken-record by a fraction. */
+export const scaleTaken = (taken: Taken[], factor: number): Taken[] =>
+  (taken || []).map((t) => ({ ...t, qty: round(num(t.qty) * factor) })).filter((t) => t.qty > 0);
+
+/** Settle an entry whose amount changed: compare the stock it already drew
+ *  against what it should draw now, and report the difference. Recomputing
+ *  from the target (rather than scaling by a delta) keeps repeated nudges of
+ *  a stepper from accumulating rounding drift. */
+export function reconcileTaken(had: Taken[], wanted: Consumption[]): {
+  take: Consumption[]; give: Taken[]; kept: Taken[];
+} {
+  const byName = new Map<string, { qty: number; snap: Taken }>();
+  (had || []).forEach((t) => {
+    const k = key(t.name); const q = num(t.qty);
+    const cur = byName.get(k);
+    if (cur) cur.qty += q; else byName.set(k, { qty: q, snap: { ...t } });
+  });
+  const want = new Map<string, number>();
+  (wanted || []).forEach((c) => {
+    const k = key(c.name); const q = num(c.qty);
+    if (k && q > 0) want.set(k, (want.get(k) || 0) + q);
+  });
+  const take: Consumption[] = [];
+  const give: Taken[] = [];
+  const kept: Taken[] = [];
+  for (const k of new Set([...byName.keys(), ...want.keys()])) {
+    const have = byName.get(k);
+    const hadQty = have ? have.qty : 0;
+    const wantQty = want.get(k) || 0;
+    const name = have ? have.snap.name : (wanted.find((c) => key(c.name) === k)?.name || k);
+    if (wantQty > hadQty) take.push({ name, qty: round(wantQty - hadQty) });
+    else if (wantQty < hadQty && have) give.push({ ...have.snap, qty: round(hadQty - wantQty) });
+    const keep = Math.min(hadQty, wantQty);
+    if (keep > 0 && have) kept.push({ ...have.snap, qty: round(keep) });
+  }
+  return { take, give, kept };
+}
+
+/** Back-compat helper: subtract and return just the pantry. */
+export function consumePantry<T extends { name: string; qty: any }>(pantry: T[], consumptions: Consumption[]): T[] {
+  return takeFromPantry(pantry, consumptions).pantry;
 }
 
 /* ---- generation ---- */
@@ -129,14 +226,15 @@ function fillWithIngredients(
 
 /** Walk each day's meal slots: place the best in-stock recipe suited to that
  *  slot, then top the meal up with ingredients if it lands short. Deterministic. */
-export function generatePlan({ items, goals, startDate, days = 7, mealsPerDay = 3, recipes = [], foods = [] }: {
+export function generatePlan({ items, goals, startDate, days = 7, mealsPerDay = 3, recipes = [], foods = [], slots }: {
   items: InventoryItem[]; goals: { protein: any; carbs: any; fat: any };
   startDate: string; days?: number; mealsPerDay?: number;
-  recipes?: PlannerRecipe[]; foods?: PlannerFood[];
+  recipes?: PlannerRecipe[]; foods?: PlannerFood[]; slots?: Slot[];
 }): PlanResult {
   const daily: Macros = { protein: num(goals.protein), carbs: num(goals.carbs), fat: num(goals.fat) };
   const dailyCals = calsFrom(daily.protein, daily.carbs, daily.fat);
-  const meals = Math.max(1, Math.min(8, Math.round(mealsPerDay) || 3));
+  const slotList = slotsFrom(mealsPerDay, slots);
+  const meals = slotList.length;
   const perMeal: Macros = { protein: daily.protein / meals, carbs: daily.carbs / meals, fat: daily.fat / meals };
   const perMealCals = dailyCals / meals;
 
@@ -159,7 +257,8 @@ export function generatePlan({ items, goals, startDate, days = 7, mealsPerDay = 
     const date = addDays(startDate, d);
     const usedToday = new Set<string>();
     for (let m = 0; m < meals; m++) {
-      const slot = slotFor(m);
+      const slot = slotList[m].id;
+      const slotKind = slotList[m].kind;
       const got: Macros = { protein: 0, carbs: 0, fat: 0 };
       const mealEntries: Record<string, PlanDraft> = {};
 
@@ -174,7 +273,7 @@ export function generatePlan({ items, goals, startDate, days = 7, mealsPerDay = 
           let best: { c: typeof cookable[number]; delta: number } | null = null;
           for (const c of cookable) {
             if (!allowRepeat && usedToday.has(c.r.id)) continue;
-            const suits = !c.r.meals || c.r.meals.length === 0 || c.r.meals.includes(slot);
+            const suits = !c.r.meals || c.r.meals.length === 0 || c.r.meals.includes(slotKind);
             if (!suits) continue;
             const inStock = c.need.every((n) => {
               const row = invByName.get(key(n.name));

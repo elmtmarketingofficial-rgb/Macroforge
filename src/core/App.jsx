@@ -1922,6 +1922,113 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
     </Modal>
   );
 }
+/* Shown when a device has never been invited. Sign up here and the invite
+   lands by email; paste the key from an older email to unlock straight away. */
+function InviteGate({ onUnlocked }) {
+  const [email, setEmail] = useState('');
+  const [key, setKey] = useState('');
+  const [state, setState] = useState(''); // '' | 'sending' | 'sent' | 'checking'
+  const [err, setErr] = useState('');
+  const [showKey, setShowKey] = useState(false);
+
+  const join = async () => {
+    const e = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(e)) { setErr('That email doesn’t look right.'); return; }
+    setErr(''); setState('sending');
+    try {
+      const r = await fetch('/api/signup', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: e, device: 'app-gate', source: (() => { try { return localStorage.getItem('mf2_src') || 'direct'; } catch { return 'direct'; } })() }),
+      });
+      if (!r.ok && r.status !== 202) throw new Error('failed');
+      setState('sent');
+    } catch {
+      setState(''); setErr('Couldn’t reach the server — check your connection and try again.');
+    }
+  };
+
+  const redeem = async () => {
+    const k = key.trim();
+    if (!k) return;
+    setErr(''); setState('checking');
+    try {
+      const r = await fetch('/api/invite', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: k }),
+      });
+      const d = await r.json();
+      if (d.ok) { onUnlocked(); return; }
+      setState(''); setErr(d.error === 'this invite has been used on too many devices' ? d.error : 'That key isn’t valid. Check the email it came in.');
+    } catch {
+      setState(''); setErr('Couldn’t reach the server — check your connection.');
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center p-4" style={{ background: `radial-gradient(130% 75% at 50% -8%, ${T.limeDim}, transparent 55%), ${T.bg}`, color: T.text, fontFamily: "'Archivo', system-ui, sans-serif" }}>
+      <style>{`@import url('https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap'); input::placeholder { color: #50505a; }`}</style>
+      <div className="w-full fadein" style={{ maxWidth: 400 }}>
+        <div className="flex items-center gap-2.5 mb-6">
+          <div className="flex items-center justify-center rounded-xl" style={{ width: 40, height: 40, background: T.lime }}>
+            <Flame size={22} style={{ color: '#0c0c0e' }} />
+          </div>
+          <div>
+            <div style={{ ...display, fontSize: 22, lineHeight: 1 }}>MACROFORGE</div>
+            <div className="text-xs" style={{ color: T.faint }}>fuel · plan · train · adapt</div>
+          </div>
+        </div>
+
+        {state === 'sent' ? (
+          <Card>
+            <div style={{ ...display, fontSize: 20, marginBottom: 8 }}>CHECK YOUR EMAIL</div>
+            <div className="text-sm" style={{ color: T.muted, lineHeight: 1.6 }}>
+              Your invite is on its way to <b style={{ color: T.text }}>{email.trim().toLowerCase()}</b>. Open the link in it on this device and you're in.
+            </div>
+            <div className="text-xs mt-3" style={{ color: T.faint, lineHeight: 1.6 }}>
+              Signed up before? That works too — this resends your invite. Nothing after a minute or two? Check spam, then <button onClick={() => { setState(''); setShowKey(true); }} style={{ color: T.lime, fontWeight: 700 }}>enter your key by hand</button>.
+            </div>
+          </Card>
+        ) : (
+          <Card>
+            <div style={{ ...display, fontSize: 20, marginBottom: 6 }}>INVITE-ONLY BETA</div>
+            <div className="text-sm mb-4" style={{ color: T.muted, lineHeight: 1.6 }}>
+              MacroForge is the macro tracker that starts at the grocery store. It's free and in closed beta — drop your email and the invite comes straight back.
+            </div>
+            <div className="flex flex-col gap-2">
+              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" inputMode="email" autoComplete="email" placeholder="you@example.com"
+                onKeyDown={(e) => { if (e.key === 'Enter') join(); }}
+                className="w-full rounded-xl px-3 py-3 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text }} />
+              <PrimaryBtn onClick={join} full>{state === 'sending' ? 'Sending…' : 'Send my invite'}</PrimaryBtn>
+            </div>
+            {err && <div className="text-xs mt-2.5" style={{ color: '#ff8a8a' }}>{err}</div>}
+            <div className="text-xs mt-3" style={{ color: T.faint, lineHeight: 1.6 }}>
+              No password, and your food data never leaves your device. Beta updates only — nothing else.
+            </div>
+
+            <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${T.border}` }}>
+              {showKey ? (
+                <div className="flex flex-col gap-2">
+                  <div className="text-xs" style={{ color: T.muted }}>Paste the invite key from your email:</div>
+                  <div className="flex gap-2">
+                    <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="invite key"
+                      onKeyDown={(e) => { if (e.key === 'Enter') redeem(); }}
+                      className="flex-1 rounded-lg px-3 py-2 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono, minWidth: 0 }} />
+                    <button onClick={redeem} className="rounded-lg px-3 text-sm shrink-0" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700 }}>
+                      {state === 'checking' ? '…' : 'unlock'}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button onClick={() => setShowKey(true)} className="text-xs" style={{ color: T.faint }}>
+                  Already have an invite key? <span style={{ color: T.lime, fontWeight: 700 }}>Enter it</span>
+                </button>
+              )}
+            </div>
+          </Card>
+        )}
+      </div>
+    </div>
+  );
+}
 /* The 30-day funnel: how many arrived, how many signed up, how many actually
    used the thing. Percentages are of the step above, so a collapse is obvious. */
 function FunnelPanel({ stats }) {
@@ -2396,7 +2503,8 @@ export default function App() {
   const [seedState, setSeedState, sdL] = usePersistentState('mf2_seed', ''); // '' | 'added' | 'dismissed'
   const [seedVersion, setSeedVersion, svL] = usePersistentState('mf2_seedVersion', 0);
   const [onboarded, setOnboarded, obL] = usePersistentState('mf2_onboarded', false);
-  const ready = sL && fL && rL && lL && pL && gL && paL && waL && uL && wL && roL && weL && mL && syL && sdL && svL && obL;
+  const [invited, setInvited, ivL] = usePersistentState('mf2_invited', false);
+  const ready = sL && fL && rL && lL && pL && gL && paL && waL && uL && wL && roL && weL && mL && syL && sdL && svL && obL && ivL;
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [recipesOpen, setRecipesOpen] = useState(false);
@@ -2414,6 +2522,25 @@ export default function App() {
     const fixed = migrateMeals(settings.meals);
     if (JSON.stringify(fixed) !== JSON.stringify(settings.meals)) setSettings((s) => ({ ...s, meals: fixed }));
   }, [ready]);
+  /* Invite gate. The link in the invite email carries ?k=… — spend it once and
+     the device is unlocked for good. Anyone already using the app keeps their
+     access: a device with history predates the gate and is never locked out. */
+  useEffect(() => {
+    if (!ready || invited) return;
+    if (onboarded || log.length || foods.length || syncMeta?.code || adminToken) { setInvited(true); return; }
+    let key = '';
+    try { key = new URLSearchParams(location.search).get('k') || ''; } catch {}
+    if (!key) return;
+    fetch('/api/invite', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key }) })
+      .then((r) => r.json())
+      .then((d) => {
+        if (!d.ok) return;
+        setInvited(true);
+        // don't leave the key sitting in the address bar to be copied around
+        try { history.replaceState(null, '', location.pathname); } catch {}
+      })
+      .catch(() => {});
+  }, [ready, invited, onboarded, adminToken]);
   /* funnel: counts only — which channel brought someone, and how far they got.
      Waits for storage so a brand-new device isn't miscounted as returning. */
   const counted = useRef(false);
@@ -2708,6 +2835,8 @@ export default function App() {
     { id: 'coach', label: 'Coach', Icon: Target },
   ];
   useEffect(() => { if (notice) { const t = setTimeout(() => setNotice(''), 4000); return () => clearTimeout(t); } }, [notice]);
+  // hold the gate until storage has loaded, so an invited device never flashes it
+  if (ready && !invited) return <InviteGate onUnlocked={() => setInvited(true)} />;
   return (
     <div className="min-h-screen w-full" style={{ background: `radial-gradient(130% 75% at 50% -8%, ${T.limeDim}, transparent 55%), ${T.bg}`, color: T.text, fontFamily: "'Archivo', system-ui, sans-serif" }}>
       <style>{`

@@ -3,18 +3,21 @@
    emailed immediately — cold traffic goes cold within the hour. */
 import { configured, redis } from './_store.js';
 import { record } from './track.js';
+import { keyFor } from './invite.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const APP_URL = process.env.APP_URL || 'https://macroforge-v2.vercel.app';
 
 const SUBJECT = "You're in — MacroForge beta";
 
-const inviteText = `Thanks for jumping on the beta.
+const inviteText = (link, key) => `Thanks for jumping on the beta.
 
 MacroForge is a macro tracker that starts where your week actually starts: the grocery store. It builds your meal plan from the food you'll actually have, and while you're shopping you can scan a barcode and find out whether that item is worth buying for the week you're having.
 
-Open this on your phone:
-${APP_URL}
+Open this on your phone — the link is yours and unlocks the app:
+${link}
+
+If you ever need to unlock another device by hand, your invite key is: ${key}
 
 Three things worth doing first (about two minutes):
 
@@ -36,7 +39,7 @@ It's early, so expect rough edges. Free now, free for the whole beta.
 
 — Ethan`;
 
-const inviteHtml = `<!doctype html><html><body style="margin:0;padding:0;background:#0c0c0e;">
+const inviteHtml = (link, key) => `<!doctype html><html><body style="margin:0;padding:0;background:#0c0c0e;">
 <div style="max-width:560px;margin:0 auto;padding:32px 24px;background:#0c0c0e;color:#f3f3f1;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;line-height:1.6;">
   <div style="font-size:26px;font-weight:800;letter-spacing:1px;color:#f3f3f1;">MACROFORGE</div>
   <div style="font-size:13px;color:#8c8c96;margin-bottom:26px;">fuel &middot; plan &middot; train &middot; adapt</div>
@@ -44,7 +47,8 @@ const inviteHtml = `<!doctype html><html><body style="margin:0;padding:0;backgro
   <div style="font-size:22px;font-weight:700;margin-bottom:12px;">You're in.</div>
   <p style="color:#c9c9cf;margin:0 0 18px;">MacroForge is a macro tracker that starts where your week actually starts: the grocery store. It builds your meal plan from the food you'll actually have, and while you're shopping you can scan a barcode and find out whether that item is worth buying for the week you're having.</p>
 
-  <p style="margin:0 0 26px;"><a href="${APP_URL}" style="display:inline-block;background:#cbff3a;color:#0c0c0e;font-weight:800;text-decoration:none;padding:13px 24px;border-radius:12px;">Open MacroForge</a></p>
+  <p style="margin:0 0 10px;"><a href="${link}" style="display:inline-block;background:#cbff3a;color:#0c0c0e;font-weight:800;text-decoration:none;padding:13px 24px;border-radius:12px;">Open MacroForge</a></p>
+  <p style="color:#5b5b65;font-size:12px;margin:0 0 26px;">This link is yours and unlocks the beta. Unlocking another device by hand? Your invite key is <span style="color:#c9c9cf;font-family:ui-monospace,monospace;">${key}</span></p>
 
   <div style="font-size:11px;letter-spacing:1.5px;color:#5b5b65;font-weight:700;margin-bottom:10px;">THREE THINGS FIRST</div>
   <p style="color:#c9c9cf;margin:0 0 10px;"><b style="color:#f3f3f1;">1. Install it.</b> Your browser will offer &ldquo;Add to Home Screen&rdquo; or &ldquo;Install app&rdquo;. It then runs like a normal app and works offline.</p>
@@ -62,15 +66,16 @@ const inviteHtml = `<!doctype html><html><body style="margin:0;padding:0;backgro
 </div></body></html>`;
 
 /** Fire the invite. Returns quietly if no mail provider is configured. */
-async function sendInvite(email) {
+async function sendInvite(email, inviteKey) {
   const key = process.env.RESEND_API_KEY;
   const from = process.env.INVITE_FROM;
   if (!key || !from) return { sent: false, reason: 'mail not configured' };
+  const link = inviteKey ? `${APP_URL}/?k=${encodeURIComponent(inviteKey)}` : APP_URL;
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to: [email], subject: SUBJECT, html: inviteHtml, text: inviteText }),
+      body: JSON.stringify({ from, to: [email], subject: SUBJECT, html: inviteHtml(link, inviteKey || ''), text: inviteText(link, inviteKey || '') }),
     });
     if (!res.ok) return { sent: false, reason: `resend ${res.status}` };
     return { sent: true };
@@ -87,16 +92,27 @@ export default async function handler(req, res) {
     if (!configured) return res.status(202).json({ stored: false });
 
     const existing = await redis('HGET', 'mf:signups', e);
+    let prev = {};
+    if (existing) { try { prev = JSON.parse(existing); } catch { prev = {}; } }
     // count the conversion once, against whatever channel sent them
     if (!existing) { try { await record({ event: 'signup', source }); } catch {} }
+
+    // one key per person, minted on the way in and reused on every re-signup
+    const inviteKey = await keyFor(e);
+    /* Someone who already signed up can ask again — they've lost the email, or
+       they're on a new device. Resend, but not more than once an hour, so this
+       can't be used to bury a stranger's inbox. */
+    const lastSent = Number(prev.lastInvite) || 0;
+    const mayResend = !existing || Date.now() - lastSent > 3600_000;
+    const invite = mayResend ? await sendInvite(e, inviteKey) : { sent: false, reason: 'invited recently' };
+
     await redis('HSET', 'mf:signups', e, JSON.stringify({
       email: e,
-      device: String(device || '').slice(0, 40),
-      ts: existing ? (JSON.parse(existing).ts || Date.now()) : Date.now(),
+      device: String(device || '').slice(0, 40) || prev.device || '',
+      ts: prev.ts || Date.now(),
+      lastInvite: invite.sent ? Date.now() : lastSent,
     }));
-    // only invite once, so a double-submit doesn't double-mail
-    const invite = existing ? { sent: false, reason: 'already invited' } : await sendInvite(e);
-    return res.status(200).json({ stored: true, invited: invite.sent });
+    return res.status(200).json({ stored: true, invited: invite.sent, resent: Boolean(existing && invite.sent) });
   }
   if (req.method === 'GET') {
     const token = (req.query && req.query.token) || '';

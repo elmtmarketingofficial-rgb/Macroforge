@@ -7,6 +7,7 @@ import { X, ScanLine, Keyboard, ShoppingCart, Package, BadgeCheck, RefreshCw, Wi
 import { num, round, calsFrom } from '../lib/engine';
 import { lookupBarcode } from '../lib/off';
 import { scoreScan } from '../lib/pyramid';
+import { trackOnce } from '../lib/track';
 import { T, MACROS, MK, display, mono } from './tokens';
 
 const FORMATS = ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_128'];
@@ -40,6 +41,7 @@ export default function Scanner({ open, onClose, goals, list, mealsPerDay, onAdd
       return;
     }
     setResult({ code, product: null, score: null, status: 'loading' });
+    trackOnce('first_scan');
     try {
       const product = await lookupBarcode(code);
       if (!product) {

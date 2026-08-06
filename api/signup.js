@@ -2,6 +2,7 @@
    admin token alongside unknown-food reports. New signups get the invite
    emailed immediately — cold traffic goes cold within the hour. */
 import { configured, redis } from './_store.js';
+import { record } from './track.js';
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 const APP_URL = process.env.APP_URL || 'https://macroforge-v2.vercel.app';
@@ -80,12 +81,14 @@ async function sendInvite(email) {
 
 export default async function handler(req, res) {
   if (req.method === 'POST') {
-    const { email, device } = req.body || {};
+    const { email, device, source } = req.body || {};
     const e = String(email || '').trim().toLowerCase().slice(0, 120);
     if (!EMAIL_RE.test(e)) return res.status(400).json({ error: 'bad email' });
     if (!configured) return res.status(202).json({ stored: false });
 
     const existing = await redis('HGET', 'mf:signups', e);
+    // count the conversion once, against whatever channel sent them
+    if (!existing) { try { await record({ event: 'signup', source }); } catch {} }
     await redis('HSET', 'mf:signups', e, JSON.stringify({
       email: e,
       device: String(device || '').slice(0, 40),

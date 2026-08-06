@@ -187,6 +187,28 @@
 
   <script>
     (function () {
+      /* first-touch attribution, shared with the app (same origin, same key) */
+      function source() {
+        try {
+          var stored = localStorage.getItem('mf2_src');
+          if (stored) return stored;
+          var q = new URLSearchParams(location.search);
+          var src = q.get('utm_source') || q.get('ref') || q.get('src') || '';
+          if (!src && document.referrer) {
+            var host = new URL(document.referrer).hostname.replace(/^www\./, '');
+            if (host && host !== location.hostname) src = host;
+          }
+          src = (src || 'direct').toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 32) || 'direct';
+          localStorage.setItem('mf2_src', src);
+          return src;
+        } catch (e) { return 'direct'; }
+      }
+      try {
+        var body = JSON.stringify({ event: 'join_view', source: source() });
+        if (navigator.sendBeacon) navigator.sendBeacon('/api/track', new Blob([body], { type: 'application/json' }));
+        else fetch('/api/track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
+      } catch (e) {}
+
       var device = '';
       var chips = document.querySelectorAll('.device-chip');
       chips.forEach(function (c) {
@@ -205,7 +227,7 @@
         go.disabled = true; go.textContent = 'Adding…';
         fetch('/api/signup', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email, device: device })
+          body: JSON.stringify({ email: email, device: device, source: source() })
         }).then(function (r) {
           if (!r.ok && r.status !== 202) throw new Error('bad status');
           ok.style.display = 'block';

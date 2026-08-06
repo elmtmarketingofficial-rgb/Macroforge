@@ -26,6 +26,7 @@ import { remainingGap } from '../lib/pyramid';
 import { DEFAULT_MEALS, DEFAULT_SHOPPING, addMeal, kindForTime, migrateMeals, minutesOf, slotsOf, dueMealReminders, dueNudges, dueShoppingReminder, fireKey } from '../lib/reminders';
 import { makeSyncCode, normSyncCode, threeWayMerge, payloadsEqual, SYNC_STORES } from '../lib/sync';
 import { makeStarterLibrary, upgradeStarterLibrary, STARTER_FOODS, STARTER_RECIPES } from '../lib/starter';
+import { track, trackOnce, hasFired } from '../lib/track';
 import { storage } from '../storage';
 
 /* Barcode scanner loads lazily — camera + decoder stay out of the main bundle */
@@ -883,6 +884,7 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
       ...p.filter((e) => e.date < genStart || e.date > end),
       ...preview.entries.map((e) => ({ id: uid(), ...e })),
     ]);
+    trackOnce('first_plan');
     setGenOpen(false);
     setSelDate(genStart);
     setAnchor(genStart);
@@ -1920,14 +1922,78 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
     </Modal>
   );
 }
+/* The 30-day funnel: how many arrived, how many signed up, how many actually
+   used the thing. Percentages are of the step above, so a collapse is obvious. */
+function FunnelPanel({ stats }) {
+  const t = stats.totals || {};
+  const steps = [
+    { key: 'join_view', label: 'Saw the landing page' },
+    { key: 'signup', label: 'Signed up' },
+    { key: 'app_new', label: 'Opened the app' },
+    { key: 'first_log', label: 'Logged food' },
+    { key: 'first_plan', label: 'Generated a week' },
+  ];
+  const top = Math.max(1, ...steps.map((s) => t[s.key] || 0));
+  const sources = (stats.sources || []).slice(0, 6);
+  return (
+    <>
+      <Label style={{ marginBottom: 6 }}>Funnel · last 30 days</Label>
+      <div className="flex items-baseline gap-3 mb-2.5" style={{ ...mono, fontSize: 11, color: T.faint }}>
+        <span><b style={{ color: T.text, fontSize: 13 }}>{t.uniques || 0}</b> visitors</span>
+        <span><b style={{ color: T.text, fontSize: 13 }}>{t.install || 0}</b> installs</span>
+        <span><b style={{ color: T.text, fontSize: 13 }}>{t.first_scan || 0}</b> first scans</span>
+      </div>
+      <div className="flex flex-col gap-1.5 mb-4">
+        {steps.map((s, i) => {
+          const n = t[s.key] || 0;
+          const prev = i === 0 ? 0 : (t[steps[i - 1].key] || 0);
+          const pct = i > 0 && prev > 0 ? Math.round((n / prev) * 100) : null;
+          return (
+            <div key={s.key}>
+              <div className="flex items-center justify-between" style={{ fontSize: 12 }}>
+                <span style={{ color: T.muted }}>{s.label}</span>
+                <span style={{ ...mono, color: T.text, fontWeight: 700 }}>
+                  {n}{pct !== null && <span style={{ color: pct >= 30 ? T.lime : T.faint, fontWeight: 600, marginLeft: 6 }}>{pct}%</span>}
+                </span>
+              </div>
+              <div className="rounded-full overflow-hidden mt-1" style={{ height: 4, background: T.panel2 }}>
+                <div style={{ height: '100%', width: `${Math.round((n / top) * 100)}%`, background: T.lime, borderRadius: 999, opacity: 1 - i * 0.13 }} />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+      {sources.length > 0 && (
+        <>
+          <Label style={{ marginBottom: 6 }}>Where they came from</Label>
+          <div className="flex flex-col gap-1.5 mb-4">
+            {sources.map((s) => (
+              <div key={s.source} className="flex items-center justify-between rounded-lg px-3 py-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+                <span style={{ ...mono, fontSize: 12, color: T.text }} className="truncate">{s.source}</span>
+                <span className="text-xs shrink-0" style={{ color: T.faint, marginLeft: 8 }}>
+                  {s.join_view || 0} views · <b style={{ color: T.lime }}>{s.signup || 0}</b> signups
+                </span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
 function ReportsModal({ open, onClose, token, localUnknowns }) {
   const [rows, setRows] = useState(null);
   const [signups, setSignups] = useState(null);
   const [feedback, setFeedback] = useState(null);
+  const [stats, setStats] = useState(null);
   const [err, setErr] = useState('');
   useEffect(() => {
     if (!open) return;
-    setRows(null); setSignups(null); setFeedback(null); setErr('');
+    setRows(null); setSignups(null); setFeedback(null); setStats(null); setErr('');
+    fetch(`/api/track?token=${encodeURIComponent(token)}&days=30`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
+      .then((d) => setStats(d))
+      .catch(() => setStats({ totals: {}, sources: [], days: [] }));
     fetch(`/api/report?token=${encodeURIComponent(token)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`server ${r.status}`))))
       .then((d) => setRows(Array.isArray(d.reports) ? d.reports : []))
@@ -1943,6 +2009,7 @@ function ReportsModal({ open, onClose, token, localUnknowns }) {
   }, [open, token]);
   return (
     <Modal open={open} onClose={onClose} title="Developer" icon={<ScanLine size={16} style={{ color: T.orange }} />} maxW={480}>
+      {stats && <FunnelPanel stats={stats} />}
       {signups !== null && (
         <>
           <Label style={{ marginBottom: 6 }}>Beta signups · {signups.length}</Label>
@@ -2347,6 +2414,23 @@ export default function App() {
     const fixed = migrateMeals(settings.meals);
     if (JSON.stringify(fixed) !== JSON.stringify(settings.meals)) setSettings((s) => ({ ...s, meals: fixed }));
   }, [ready]);
+  /* funnel: counts only — which channel brought someone, and how far they got.
+     Waits for storage so a brand-new device isn't miscounted as returning. */
+  const counted = useRef(false);
+  useEffect(() => {
+    if (!ready || counted.current) return;
+    counted.current = true;
+    const seen = hasFired('app_new');
+    trackOnce('app_new');
+    if (seen) track('app_open');
+    const onInstalled = () => trackOnce('install');
+    window.addEventListener('appinstalled', onInstalled);
+    return () => window.removeEventListener('appinstalled', onInstalled);
+  }, [ready]);
+  /* activation: first food ever logged on this device, whichever way it got there */
+  useEffect(() => {
+    if (ready && log.length) trackOnce('first_log');
+  }, [ready, log.length]);
   /* developer token arrives via #admin=TOKEN in the URL */
   useEffect(() => {
     const m = /^#admin=(.+)$/.exec(window.location.hash || '');

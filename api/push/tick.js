@@ -55,6 +55,27 @@ export default async function handler(req, res) {
         if (status === 404 || status === 410) { await redis('HDEL', 'mf:subs', id); pruned++; }
       }
     }
+    // weekly shopping-day reminder: same window logic plus a day-of-week gate
+    if (cfg.shopping && cfg.shopping.time) {
+      const t = minutesOf(cfg.shopping.time);
+      const localDow = new Date(Date.now() - (Number(cfg.tz) || 0) * 60000).getUTCDay();
+      if (t >= 0 && localDow === Number(cfg.shopping.day) && localMin >= t && localMin < t + WINDOW_MIN) {
+        const guard = await redis('SET', `mf:sent:${localDay}:${id}:shopping`, '1', 'NX', 'EX', 86400);
+        if (guard === 'OK') {
+          try {
+            await webpush.sendNotification(cfg.sub, JSON.stringify({
+              title: 'Shopping run today 🛒',
+              body: 'Take the list — scan as you shop and let the app judge each pick.',
+              tag: 'shopping',
+            }));
+            sent++;
+          } catch (e) {
+            const status = e && (e.statusCode || e.status);
+            if (status === 404 || status === 410) { await redis('HDEL', 'mf:subs', id); pruned++; }
+          }
+        }
+      }
+    }
   }
   return res.status(200).json({ sent, pruned, subscriptions: checked });
 }

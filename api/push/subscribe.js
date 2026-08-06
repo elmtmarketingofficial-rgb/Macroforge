@@ -9,13 +9,16 @@ const idFor = (endpoint) => createHash('sha256').update(String(endpoint)).digest
 export default async function handler(req, res) {
   if (!configured) return res.status(503).json({ error: 'storage not configured' });
   if (req.method === 'POST') {
-    const { sub, meals, nudge, tzOffsetMin } = req.body || {};
+    const { sub, meals, nudge, shopping, tzOffsetMin } = req.body || {};
     if (!sub || !sub.endpoint || !sub.keys) return res.status(400).json({ error: 'bad subscription' });
     const cleanMeals = (Array.isArray(meals) ? meals : []).slice(0, 8)
       .map((m) => ({ id: String(m.id || '').slice(0, 24), label: String(m.label || 'Meal').slice(0, 40), time: String(m.time || '') }))
       .filter((m) => /^\d{1,2}:\d{2}$/.test(m.time));
+    const cleanShopping = shopping && shopping.enabled && /^\d{1,2}:\d{2}$/.test(String(shopping.time || ''))
+      ? { day: Math.min(6, Math.max(0, Number(shopping.day) || 0)), time: String(shopping.time) }
+      : null;
     await redis('HSET', 'mf:subs', idFor(sub.endpoint), JSON.stringify({
-      sub, meals: cleanMeals, nudge: !!nudge, tz: Number(tzOffsetMin) || 0, at: Date.now(),
+      sub, meals: cleanMeals, nudge: !!nudge, shopping: cleanShopping, tz: Number(tzOffsetMin) || 0, at: Date.now(),
     }));
     return res.status(200).json({ ok: true, meals: cleanMeals.length });
   }

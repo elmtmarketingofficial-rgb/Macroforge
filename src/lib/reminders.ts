@@ -48,8 +48,27 @@ export const minutesOf = (hhmm: string): number => {
   return h * 60 + mi;
 };
 
-export const fireKey = (mealId: string, kind: 'meal' | 'nudge', now: Date): string =>
+export const fireKey = (mealId: string, kind: 'meal' | 'nudge' | 'shop', now: Date): string =>
   `${localDate(now)}|${mealId}|${kind}`;
+
+/* Weekly shopping run: a day-of-week + time instead of a daily time.
+   The web can't geofence, so this is the "you planned to shop today" nudge. */
+export type ShoppingPlan = { enabled?: boolean; day: number; time: string }; // day: 0=Sun … 6=Sat (JS getDay)
+
+export const DEFAULT_SHOPPING: ShoppingPlan = { enabled: false, day: 6, time: '10:00' };
+
+/** True when the weekly shopping reminder should fire right now. */
+export function dueShoppingReminder({ shopping, now, fired, windowMin = 15 }: {
+  shopping: ShoppingPlan | null | undefined; now: Date; fired: Set<string>; windowMin?: number;
+}): boolean {
+  if (!shopping || !shopping.enabled) return false;
+  if (now.getDay() !== Number(shopping.day)) return false;
+  const t = minutesOf(shopping.time);
+  if (t < 0) return false;
+  const cur = now.getHours() * 60 + now.getMinutes();
+  if (cur < t || cur >= t + windowMin) return false;
+  return !fired.has(fireKey('shopping', 'shop', now));
+}
 
 /** Meal reminders due right now: within [time, time+windowMin) and not already fired today. */
 export function dueMealReminders({ meals, now, fired, windowMin = 10 }: {

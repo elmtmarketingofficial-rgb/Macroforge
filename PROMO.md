@@ -1,6 +1,6 @@
 # MacroForge beta — promo kit
 
-Link to post: **https://macroforge-v2.vercel.app/join** (previews as a branded card everywhere)
+Link to post: **https://macroforge.club/join** (previews as a branded card everywhere)
 
 The angle that does the work, everywhere: **every other macro app starts at the plate.
 This one starts at the grocery store.** Lead with that, never with a feature list.
@@ -137,8 +137,8 @@ Post the link in the **last** tweet, not the first — reach is throttled on lin
 
 ## Before you post
 
-- Buy the domain. `macroforge-v2.vercel.app` reads as a dev preview and gets fewer clicks —
-  on Reddit especially, people are wary of unfamiliar hosts.
+- Domain: done — post macroforge.club links only (the old vercel.app URL keeps working for
+  installed apps, but never promote it).
 - Screenshot from your own phone, not a simulator: the scanner verdict card, a generated week,
   and the Today screen with real numbers in it. Real screenshots outperform mockups.
 - Post to one place at a time and watch what happens. Signups and feedback both land in

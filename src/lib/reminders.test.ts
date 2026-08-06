@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DEFAULT_MEALS, addMeal, kindForTime, migrateMeals, minutesOf, dueMealReminders, dueNudges, fireKey, slotsOf } from './reminders';
+import { DEFAULT_MEALS, addMeal, kindForTime, migrateMeals, minutesOf, dueMealReminders, dueNudges, fireKey, slotsOf, dueShoppingReminder } from './reminders';
 
 const at = (h: number, m: number) => new Date(2026, 7, 3, h, m); // Aug 3 2026, local
 
@@ -92,5 +92,26 @@ describe('dueNudges', () => {
     expect(unlogged.map((m) => m.label)).toEqual(['Lunch']);
     const logged = dueNudges({ meals, now, fired: new Set(), hasLogged: () => true });
     expect(logged).toHaveLength(0);
+  });
+});
+
+describe('dueShoppingReminder', () => {
+  // Aug 3 2026 is a Monday → getDay() === 1
+  const plan = { enabled: true, day: 1, time: '10:00' };
+  it('fires on the chosen weekday inside the window, once per day', () => {
+    const fired = new Set<string>();
+    expect(dueShoppingReminder({ shopping: plan, now: at(10, 5), fired })).toBe(true);
+    fired.add(fireKey('shopping', 'shop', at(10, 5)));
+    expect(dueShoppingReminder({ shopping: plan, now: at(10, 8), fired })).toBe(false);
+  });
+  it('stays quiet on other weekdays and outside the window', () => {
+    expect(dueShoppingReminder({ shopping: { ...plan, day: 6 }, now: at(10, 5), fired: new Set() })).toBe(false);
+    expect(dueShoppingReminder({ shopping: plan, now: at(9, 50), fired: new Set() })).toBe(false);
+    expect(dueShoppingReminder({ shopping: plan, now: at(10, 20), fired: new Set() })).toBe(false);
+  });
+  it('off, missing, or malformed plans never fire', () => {
+    expect(dueShoppingReminder({ shopping: { ...plan, enabled: false }, now: at(10, 5), fired: new Set() })).toBe(false);
+    expect(dueShoppingReminder({ shopping: null, now: at(10, 5), fired: new Set() })).toBe(false);
+    expect(dueShoppingReminder({ shopping: { enabled: true, day: 1, time: 'junk' }, now: at(10, 5), fired: new Set() })).toBe(false);
   });
 });

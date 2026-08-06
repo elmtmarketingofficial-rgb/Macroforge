@@ -3,7 +3,7 @@
    elsewhere (iOS Safari), manual entry always. Verdicts come from the pyramid
    scoring engine against the user's remaining weekly gap. */
 import React, { useState, useEffect, useRef } from 'react';
-import { X, ScanLine, Keyboard, ShoppingCart, Package, BadgeCheck, RefreshCw, WifiOff } from 'lucide-react';
+import { X, ScanLine, Keyboard, ShoppingCart, Package, BadgeCheck, RefreshCw, WifiOff, Camera } from 'lucide-react';
 import { num, round, calsFrom } from '../lib/engine';
 import { lookupBarcode } from '../lib/off';
 import { scoreScan } from '../lib/pyramid';
@@ -18,7 +18,7 @@ const VERDICT_STYLE = {
   unknown: { label: 'NO DATA',    color: T.muted,  bg: 'transparent',            border: T.borderHi },
 };
 
-export default function Scanner({ open, onClose, goals, list, mealsPerDay, onAdd, onUnknown }) {
+export default function Scanner({ open, onClose, goals, list, mealsPerDay, onAdd, onUnknown, onPhoto }) {
   const videoRef = useRef(null);
   const streamRef = useRef(null);
   const loopRef = useRef(null);
@@ -143,6 +143,11 @@ export default function Scanner({ open, onClose, goals, list, mealsPerDay, onAdd
             </div>
             <button onClick={() => { if (manual.trim()) { busyRef.current = false; handleCode(manual.trim()); } }} className="rounded-lg px-3 text-sm" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700 }}>look up</button>
           </div>
+          {onPhoto && !result && (
+            <button onClick={onPhoto} className="w-full flex items-center justify-center gap-1.5 rounded-lg py-2 text-xs mb-3" style={{ background: T.panel2, border: `1px dashed ${T.borderHi}`, color: T.muted, fontWeight: 700 }}>
+              <Camera size={13} /> No barcode? Snap a photo instead
+            </button>
+          )}
           {offline && !result && (
             <div className="flex items-center gap-2 text-xs rounded-xl p-3" style={{ border: `1px dashed ${T.borderHi}`, color: T.faint }}>
               <WifiOff size={14} /> You're offline — lookups need a connection in the store.

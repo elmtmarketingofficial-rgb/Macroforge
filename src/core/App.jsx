@@ -5,7 +5,7 @@ import {
   CalendarDays, BarChart3, Settings, Download, Upload, Copy, Trophy,
   Pause, Play, RotateCcw, Search, BookOpen, Utensils, Scale, Zap, Star,
   ChefHat, CalendarRange, Sparkles, ClipboardList, History, ArrowRight,
-  Globe, BadgeCheck, WifiOff, ScanLine, Bell, GlassWater, Package, RefreshCw, MessageSquare
+  Globe, BadgeCheck, WifiOff, ScanLine, Bell, GlassWater, Package, RefreshCw, MessageSquare, Camera
 } from 'lucide-react';
 import {
   num, round, calsFrom, e1rm, todayISO, parseISO, addDays, daysBetween, fmtDate,
@@ -23,13 +23,14 @@ const nameMatches = (name, q) => {
 };
 import { generatePlan, takeFromPantry, returnToPantry, reconcileTaken, recipeConsumption } from '../lib/planner';
 import { remainingGap } from '../lib/pyramid';
-import { DEFAULT_MEALS, addMeal, kindForTime, migrateMeals, minutesOf, slotsOf, dueMealReminders, dueNudges, fireKey } from '../lib/reminders';
+import { DEFAULT_MEALS, DEFAULT_SHOPPING, addMeal, kindForTime, migrateMeals, minutesOf, slotsOf, dueMealReminders, dueNudges, dueShoppingReminder, fireKey } from '../lib/reminders';
 import { makeSyncCode, normSyncCode, threeWayMerge, payloadsEqual, SYNC_STORES } from '../lib/sync';
 import { makeStarterLibrary, upgradeStarterLibrary, STARTER_FOODS, STARTER_RECIPES } from '../lib/starter';
 import { storage } from '../storage';
 
 /* Barcode scanner loads lazily — camera + decoder stay out of the main bundle */
 const Scanner = React.lazy(() => import('./Scanner.jsx'));
+const PhotoSnap = React.lazy(() => import('./PhotoSnap.jsx'));
 import { T, MACROS, MK, display, mono } from './tokens';
 
 /* Recharts loads in its own lazy chunk — see Charts.jsx */
@@ -486,6 +487,7 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
   const meals = mealsOf(settings);
   const [viewDate, setViewDate] = useState(todayISO());
   const [picker, setPicker] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [meal, setMeal] = useState(() => mealNow(meals));
   const isToday = viewDate === todayISO();
   const entries = useMemo(() => log.filter((e) => e.date === viewDate), [log, viewDate]);
@@ -547,6 +549,12 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
     const portions = Math.max(1, num(r.portions) || 1); // batch recipes log one portion
     const taken = onConsume(recipeConsumption(r, foods));
     setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'recipe', refId: r.id, name: portions > 1 ? `${r.name} (1 of ${portions})` : r.name, servings: 1, protein: m.protein / portions, carbs: m.carbs / portions, fat: m.fat / portions, taken }, ...l]);
+  };
+  /* photo estimates are whole-portion snapshots; they never draw on the pantry
+     (an AI-guessed "burrito bowl" has no stock row to draw from) */
+  const addPhotoLog = (a) => {
+    const t = a.total || {};
+    setLog((l) => [{ id: uid(), date: viewDate, meal, refType: 'custom', refId: null, name: a.name, category: a.category || 'Other', servings: 1, unitLabel: 'portion', protein: num(t.protein), carbs: num(t.carbs), fat: num(t.fat), fiber: num(t.fiber), sugar: num(t.sugar), source: 'photo', taken: [] }, ...l]);
   };
   const addCustom = ({ name, category, protein, carbs, fat, servings, unit, unitLabel, saveToLibrary }) => {
     let foodId = null;
@@ -644,7 +652,10 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
           <Chip key={fd.id} onClick={() => addExisting(fd)}><Star size={11} style={{ color: T.orange }} fill={T.orange} /> {fd.name}</Chip>
         ))}
       </div>
-      <PrimaryBtn onClick={() => { setMeal(mealNow(meals)); setPicker(true); }} full><Plus size={16} /> Add food</PrimaryBtn>
+      <div className="flex gap-2">
+        <div className="flex-1"><PrimaryBtn onClick={() => { setMeal(mealNow(meals)); setPicker(true); }} full><Plus size={16} /> Add food</PrimaryBtn></div>
+        <button onClick={() => { setMeal(mealNow(meals)); setPhotoOpen(true); }} className="flex items-center justify-center rounded-xl shrink-0" style={{ width: 46, background: T.panel, border: `1px solid ${T.borderHi}`, color: T.lime }} title="Snap your plate"><Camera size={17} /></button>
+      </div>
       {entries.length === 0 ? (
         <EmptyCard Icon={Utensils} text={`Nothing logged ${isToday ? 'today' : 'this day'} yet.`} />
       ) : (
@@ -684,6 +695,11 @@ function TodayView({ settings, setSettings, log, setLog, foods, recipes, ensureF
         </div>
       )}
       <FoodPickerModal open={picker} onClose={() => setPicker(false)} foods={foods} recipes={recipes} log={log} onAddExisting={addExisting} onAddRecipe={addRecipe} onAddCustom={addCustom} onAddOff={addOff} dateLabel={isToday ? 'today' : fmtDate(viewDate)} meal={meal} setMeal={setMeal} meals={meals} />
+      {photoOpen && (
+        <Suspense fallback={null}>
+          <PhotoSnap open={photoOpen} onClose={() => setPhotoOpen(false)} mode="meal" mealLabel={(meals.find((m) => m.id === meal) || {}).label} goals={goals} list={[]} mealsPerDay={meals.length} onLog={addPhotoLog} />
+        </Suspense>
+      )}
     </div>
   );
 }
@@ -835,6 +851,7 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
   const [genStart, setGenStart] = useState(todayISO());
   const [genDays, setGenDays] = useState(7);
   const [scanOpen, setScanOpen] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const stripTouch = useRef(null);
   const week = weekDates(anchor);
   const goalCals = calsFrom(goals.protein, goals.carbs, goals.fat);
@@ -887,6 +904,17 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
   };
   const updPantry = (id, patch) => setPantry((ps) => ps.map((p) => (p.id === id ? { ...p, ...patch } : p)));
   const delPantry = (id) => setPantry((ps) => ps.filter((p) => p.id !== id));
+  /* photo of an unlabeled item (deli counter, bakery): same destinations as a
+     scan, but the row lands at the item's estimated weight instead of 100g */
+  const addPhotoItem = (a, dest) => {
+    const t = a.total || {};
+    const grams = Math.max(1, Math.round(num(t.grams)) || 100);
+    const per100 = (k) => (num(t[k]) / grams) * 100;
+    ensureFood({ name: a.name, category: a.category || 'Other', protein: per100('protein'), carbs: per100('carbs'), fat: per100('fat'), fiber: per100('fiber'), sugar: per100('sugar'), unit: 'g100' });
+    const row = { id: uid(), name: a.name, category: a.category || 'Other', qty: grams, unitLabel: 'g', protein: num(t.protein) / grams, carbs: num(t.carbs) / grams, fat: num(t.fat) / grams, checked: false, source: 'photo' };
+    if (dest === 'pantry') setPantry((ps) => [row, ...ps]);
+    else setGroceries((gs) => [row, ...gs]);
+  };
   /* scanner: add a scanned product to the list or pantry as a per-100g item */
   const addScanned = (product, dest) => {
     ensureFood({ name: product.name, category: 'Other', protein: product.protein, carbs: product.carbs, fat: product.fat, fiber: product.fiber, sugar: product.sugars, unit: 'g100' });
@@ -1111,7 +1139,12 @@ function PlanView({ settings, setSettings, plan, setPlan, groceries, setGrocerie
       </Modal>
       {scanOpen && (
         <Suspense fallback={null}>
-          <Scanner open={scanOpen} onClose={() => setScanOpen(false)} goals={goals} list={[...groceries, ...pantry]} mealsPerDay={meals.length} onAdd={addScanned} onUnknown={onUnknownScan} />
+          <Scanner open={scanOpen} onClose={() => setScanOpen(false)} goals={goals} list={[...groceries, ...pantry]} mealsPerDay={meals.length} onAdd={addScanned} onUnknown={onUnknownScan} onPhoto={() => { setScanOpen(false); setPhotoOpen(true); }} />
+        </Suspense>
+      )}
+      {photoOpen && (
+        <Suspense fallback={null}>
+          <PhotoSnap open={photoOpen} onClose={() => setPhotoOpen(false)} mode="item" goals={goals} list={[...groceries, ...pantry]} mealsPerDay={meals.length} onAddItem={addPhotoItem} />
         </Suspense>
       )}
     </div>
@@ -1779,7 +1812,7 @@ function urlB64ToUint8(base64String) {
   const raw = atob(base64);
   return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
 }
-async function subscribeToPush(meals, nudge) {
+async function subscribeToPush(meals, nudge, shopping) {
   const pub = import.meta.env.VITE_VAPID_PUBLIC_KEY;
   if (!pub || !('serviceWorker' in navigator) || !('PushManager' in window)) return { ok: false, why: 'unsupported' };
   try {
@@ -1787,7 +1820,7 @@ async function subscribeToPush(meals, nudge) {
     const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: urlB64ToUint8(pub) });
     const res = await fetch('/api/push/subscribe', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sub: sub.toJSON(), meals, nudge, tzOffsetMin: new Date().getTimezoneOffset() }),
+      body: JSON.stringify({ sub: sub.toJSON(), meals, nudge, shopping: shopping || null, tzOffsetMin: new Date().getTimezoneOffset() }),
     });
     return { ok: res.ok, why: res.ok ? '' : `server ${res.status}` };
   } catch (e) { return { ok: false, why: String(e && e.message || e) }; }
@@ -1795,16 +1828,17 @@ async function subscribeToPush(meals, nudge) {
 function MealScheduleModal({ open, onClose, settings, setSettings }) {
   const meals = settings.meals && settings.meals.length ? settings.meals : DEFAULT_MEALS;
   const remind = settings.remind || { enabled: false, nudge: true };
+  const shopping = settings.shopping || DEFAULT_SHOPPING;
   const [pushState, setPushState] = useState('');
   /* schedule edits re-sync the server subscription (debounced) so pushes follow the new times */
   const syncTimer = useRef(null);
-  const mealsKey = JSON.stringify(meals.map((m) => [m.id, m.label, m.time]));
+  const mealsKey = JSON.stringify([meals.map((m) => [m.id, m.label, m.time]), shopping]);
   const firstSync = useRef(true);
   useEffect(() => {
     if (!open || !remind.enabled) { firstSync.current = true; return; }
     if (firstSync.current) { firstSync.current = false; return; } // skip the on-open render
     if (syncTimer.current) clearTimeout(syncTimer.current);
-    syncTimer.current = setTimeout(() => { syncPush(meals, remind.nudge); }, 1200);
+    syncTimer.current = setTimeout(() => { syncPush(meals, remind.nudge, shopping); }, 1200);
     return () => { if (syncTimer.current) clearTimeout(syncTimer.current); };
   }, [mealsKey, open]);
   const setMeals = (ms) => setSettings((s) => ({ ...s, meals: ms }));
@@ -1814,9 +1848,9 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
     : m)));
   const addOne = () => setMeals(addMeal(meals, uid));
   const removeMeal = (id) => { if (meals.length <= 1) return; setMeals(meals.filter((m) => m.id !== id)); };
-  const syncPush = async (ms, ndg) => {
+  const syncPush = async (ms, ndg, shp) => {
     setPushState('syncing…');
-    const r = await subscribeToPush(ms, ndg);
+    const r = await subscribeToPush(ms, ndg, shp ?? shopping);
     setPushState(r.ok ? 'reminders will also arrive when the app is closed' : 'reminders fire while the app is open (background push not configured)');
   };
   const toggleReminders = async () => {
@@ -1858,6 +1892,22 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
         <div className="flex items-center justify-between rounded-xl px-3 py-2.5" style={{ background: T.panel2, border: `1px solid ${T.border}`, opacity: remind.enabled ? 1 : 0.5 }}>
           <div><div className="text-sm" style={{ fontWeight: 600 }}>Missed-meal nudges</div><div className="text-xs" style={{ color: T.faint }}>90 min after a meal time with nothing logged</div></div>
           <CheckToggle checked={!!remind.nudge} onToggle={() => { const n = { ...remind, nudge: !remind.nudge }; setSettings((s) => ({ ...s, remind: n })); if (remind.enabled) syncPush(meals, n.nudge); }} label="" />
+        </div>
+        <div className="rounded-xl px-3 py-2.5" style={{ background: T.panel2, border: `1px solid ${T.border}`, opacity: remind.enabled ? 1 : 0.5 }}>
+          <div className="flex items-center justify-between">
+            <div><div className="text-sm" style={{ fontWeight: 600 }}>Shopping day</div><div className="text-xs" style={{ color: T.faint }}>a weekly heads-up with your list size</div></div>
+            <CheckToggle checked={!!shopping.enabled} onToggle={() => setSettings((s) => ({ ...s, shopping: { ...shopping, enabled: !shopping.enabled } }))} label="" />
+          </div>
+          {shopping.enabled && (
+            <div className="flex items-center gap-1.5 mt-2.5">
+              <div className="flex gap-1 flex-1">
+                {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((d, i) => (
+                  <button key={i} onClick={() => setSettings((s) => ({ ...s, shopping: { ...shopping, day: i } }))} className="flex-1 rounded-lg py-1.5 text-xs" style={{ background: Number(shopping.day) === i ? T.lime : 'transparent', border: `1px solid ${Number(shopping.day) === i ? T.lime : T.border}`, color: Number(shopping.day) === i ? '#0c0c0e' : T.muted, fontWeight: 700, ...mono }}>{d}</button>
+                ))}
+              </div>
+              <input type="time" value={shopping.time} onChange={(e) => setSettings((s) => ({ ...s, shopping: { ...shopping, time: e.target.value } }))} className="rounded-lg px-2 py-1.5 text-sm outline-none shrink-0" style={{ background: T.panel, border: `1px solid ${T.border}`, color: T.text, ...mono }} />
+            </div>
+          )}
         </div>
         {pushState && <div className="text-xs px-1" style={{ color: T.faint }}>{pushState}</div>}
       </div>
@@ -2340,12 +2390,16 @@ export default function App() {
           show(`${m.label} not logged yet`, 'Even a rough entry beats a blank day.', fireKey(m.id, 'nudge', now));
         });
       }
+      if (dueShoppingReminder({ shopping: settings.shopping, now, fired })) {
+        const open = groceries.filter((g) => !g.checked).length;
+        show('Shopping run today 🛒', open > 0 ? `${open} item${open === 1 ? '' : 's'} on the list — scan as you shop.` : 'Your list is empty — generate the week from Plan first.', fireKey('shopping', 'shop', now));
+      }
       try { localStorage.setItem('mf2_fired', JSON.stringify([...fired])); } catch {}
     };
     tick();
     const iv = setInterval(tick, 30000);
     return () => clearInterval(iv);
-  }, [ready, settings.remind, settings.goals, meals, log]);
+  }, [ready, settings.remind, settings.shopping, settings.goals, meals, log, groceries]);
   /* one-time v1 → v2 migration */
   useEffect(() => {
     if (!ready || migrated || !storageAvailable) return;

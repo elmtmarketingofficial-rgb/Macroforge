@@ -31,7 +31,7 @@ this one starts at the grocery store. Lead with that, never with a feature list.
 | App | https://macroforge.club |
 | Signup / landing page | https://macroforge.club/join |
 | Social preview card | auto-renders on any link (1200×630, branded) |
-| Signups + feedback + reports | inside the app: Settings → Developer (needs the admin token) |
+| Funnel + signups + feedback | inside the app: Settings → Developer (needs the admin token) |
 | Admin unlock | open the app with `#admin=<ADMIN_TOKEN>` — token is in `macroforge-v2\.secrets.local` |
 
 Never promote the old `macroforge-v2.vercel.app` URL. It still works for already-installed
@@ -55,6 +55,39 @@ Everything below is built, deployed, and verified in production:
 - **Water, fiber, added-sugar tracking**, meal-prep batch portions
 - **Works offline, installs from the browser** on phone and desktop
 - **Automated invite email** on signup, from hello@macroforge.club
+
+## Invite-only: how access actually works
+
+The app can't be used without signing up first. Someone who lands on macroforge.club sees a
+gate, not the app. This shapes every campaign — **the call to action is always "get an invite",
+never "try it now"**, and scarcity/exclusivity is a legitimate angle to lean on.
+
+The flow: enter email → invite arrives within seconds → the link in it (`?k=…`) unlocks the app
+on that device permanently. The email also prints the key in plain text so a second device can
+be unlocked by hand; a key works on up to 8 devices, so a link pasted publicly stops working.
+Someone who loses the email can re-enter their address to have it resent (throttled to once an
+hour so it can't be used to bombard anyone).
+
+Practical consequences for marketing:
+
+- **Every signup is a real, deliverable email address**, so the signup number is a true lead count.
+- **The gate is the conversion point.** If people arrive and don't sign up, the gate copy is the
+  thing to change — that's a code change, so bring it back to Claude Code.
+- **Anyone you want to demo it to needs an invite**, including press, friends, and collaborators.
+
+## Measurement: what you can see
+
+Analytics are built in and privacy-preserving — no cookies, no third-party scripts, no personal
+data, which keeps the "we don't harvest you" claim honest. Settings → Developer shows a 30-day
+funnel: **saw the landing page → signed up → opened the app → logged food → generated a week**,
+each step showing conversion from the step above, plus unique visitors, installs and first scans,
+broken down by traffic source.
+
+**Tag every campaign link** or the source shows as "direct". Append `?utm_source=NAME` —
+e.g. `https://macroforge.club/join?utm_source=reddit`. First touch is what gets the credit, so
+whoever brought someone in keeps it even if they return later by typing the address. Use one
+clear name per channel (`reddit`, `instagram`, `tiktok`, `x`) and keep it consistent — the
+dashboard groups by exactly that string.
 
 ### ⚠️ Do NOT promote yet: AI photo logging
 
@@ -132,12 +165,7 @@ Honest list of gaps, roughly in priority order:
 1. **Real screenshots.** Every piece of promo needs them and none exist yet. Needed from a real
    phone, not a mockup: the scanner verdict card, a generated week, and the Today screen with
    real numbers in it. This is the single highest-leverage thing to produce first.
-2. **No analytics at all.** There is currently zero tracking on the site — no page views, no
-   traffic sources, no funnel. Signups are visible in Settings → Developer, and that's the only
-   signal. Meaning: you'll know *how many* signed up, but not how many visited, where they came
-   from, or what percentage converted. **This should be fixed before a real traffic push** —
-   it's a small engineering job (see below).
-3. **No demo video or GIF** for people who won't install anything to evaluate it.
+2. **No demo video or GIF** for people who won't install anything to evaluate it.
 4. **No App Store presence.** It's a web app; every competitor is in the stores. A Capacitor
    wrapper is on the roadmap but deliberately deferred.
 5. **Photo logging is dark** until credits (see above).
@@ -149,9 +177,8 @@ Honest list of gaps, roughly in priority order:
 Marketing strategy, content, scheduling, community management, and creative direction are
 better handled elsewhere. But some marketing *needs* code changes, and those come back here:
 
-- **Adding analytics** — privacy-respecting page-view + referrer tracking, and a real
-  conversion funnel (visit → signup → app opened → first food logged). ← *most urgent*
-- **Landing page changes** — new headlines, added social proof, restructured layout, A/B variants
+- **Landing page and gate copy** — new headlines, social proof, restructured layout, A/B variants
+- **New funnel steps or metrics** if a campaign needs something the dashboard doesn't show
 - **The social preview card** — the image that renders when links are shared is generated in code
 - **UTM handling** — if campaigns need per-channel attribution
 - **Anything about how the product behaves** in response to what testers say
@@ -163,8 +190,10 @@ better handled elsewhere. But some marketing *needs* code changes, and those com
 ## Immediate next moves, in order
 
 1. **Take the screenshots** (phone, real data) — blocks everything else.
-2. **Add analytics** before driving traffic, or the first campaign teaches you nothing.
-3. **Add Anthropic credits**, then decide whether photo logging launches with round one or
+2. **Add Anthropic credits**, then decide whether photo logging launches with round one or
    as a follow-up beat.
-4. **Post to r/mealprep first** — best fit, copy is ready, single channel so the result is readable.
-5. Watch signups in Settings → Developer; every signup auto-receives the invite email.
+3. **Post to r/mealprep first** — best fit, copy is ready, single channel so the result is
+   readable. Tag the link `?utm_source=reddit`.
+4. Watch the funnel in Settings → Developer. Signups auto-receive their invite; the number that
+   matters is not signups but how many reach **logged food** — that's the one that predicts
+   whether anyone stays.

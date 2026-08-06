@@ -131,9 +131,16 @@ export default async function handler(req, res) {
     });
   } catch (e) {
     if (e instanceof Anthropic.APIError) {
+      console.error('photo: api error', e.status, String(e.message).slice(0, 300));
       if (e.status === 401) return res.status(503).json({ error: 'not configured', configured: false });
+      // an out-of-credits account is "not configured" from the tester's point of view
+      if (e.status === 400 && /credit balance/i.test(String(e.message))) {
+        return res.status(503).json({ error: 'not configured', configured: false });
+      }
       if (e.status === 429) return res.status(429).json({ error: 'analysis service is busy — try again shortly' });
       if (e.status === 529) return res.status(503).json({ error: 'analysis service is overloaded — try again shortly' });
+    } else {
+      console.error('photo: unexpected error', e);
     }
     return res.status(502).json({ error: 'analysis failed' });
   }

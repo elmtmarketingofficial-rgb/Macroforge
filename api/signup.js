@@ -71,11 +71,19 @@ async function sendInvite(email, inviteKey) {
   const from = process.env.INVITE_FROM;
   if (!key || !from) return { sent: false, reason: 'mail not configured' };
   const link = inviteKey ? `${APP_URL}/?k=${encodeURIComponent(inviteKey)}` : APP_URL;
+  /* Testers hit reply on the first email they get. The sending address is a
+     brand one that may not have a mailbox behind it, so point replies at one
+     that definitely does — a bounced reply is a tester lost on day one. */
+  const replyTo = process.env.REPLY_TO || '';
   try {
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from, to: [email], subject: SUBJECT, html: inviteHtml(link, inviteKey || ''), text: inviteText(link, inviteKey || '') }),
+      body: JSON.stringify({
+        from, to: [email], subject: SUBJECT,
+        ...(replyTo ? { reply_to: replyTo } : {}),
+        html: inviteHtml(link, inviteKey || ''), text: inviteText(link, inviteKey || ''),
+      }),
     });
     if (!res.ok) return { sent: false, reason: `resend ${res.status}` };
     return { sent: true };

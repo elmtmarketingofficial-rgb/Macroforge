@@ -54,7 +54,13 @@ Everything below is built, deployed, and verified in production:
 - **Device sync via private code** — no account, no password, no email required
 - **Water, fiber, added-sugar tracking**, meal-prep batch portions
 - **Works offline, installs from the browser** on phone and desktop
-- **Automated invite email** on signup, from hello@macroforge.club
+- **Automated invite email** on signup, from hello@macroforge.club (replies route to ethan@macroforge.club)
+
+**Contact addresses:** `ethan@macroforge.club` is the real mailbox (Zoho — its own app,
+deliberately separate from the ELMT Marketing Gmail so a beta tester is never mistaken for a
+sales lead). `info@macroforge.club` is an alias landing in the same inbox and is the one safe to
+publish. Anything else on the domain bounces — `support@`, `hello@` and friends have no mailbox,
+so never print them in a post, bio, or video.
 
 ## Invite-only: how access actually works
 

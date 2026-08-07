@@ -131,6 +131,38 @@ export function upgradeStarterLibrary(
   };
 }
 
+/** Add the pack to a library that already has things in it — the "I skipped
+ *  this at setup and want it now" case. Matching is by name, so nothing is
+ *  duplicated and nothing the user edited is overwritten; running it twice is
+ *  a no-op. Recipes attach to whichever food row already carries that name. */
+export function mergeStarterLibrary(
+  foods: any[], recipes: any[], idFn: () => string,
+): { foods: any[]; recipes: any[]; addedFoods: number; addedRecipes: number } {
+  const key = (n: any) => String(n || '').trim().toLowerCase();
+  const have = new Set((foods || []).map((f) => key(f.name)));
+  const newFoods = STARTER_FOODS.filter((f) => !have.has(key(f.name)))
+    .map((f) => ({ id: idFn(), favorite: false, fiber: 0, sugar: 0, ...f }));
+
+  const allFoods = [...newFoods, ...(foods || [])];
+  const idByName = new Map(allFoods.map((f) => [key(f.name), f.id]));
+
+  const haveRecipes = new Set((recipes || []).map((r) => key(r.name)));
+  const newRecipes = STARTER_RECIPES.filter((r) => !haveRecipes.has(key(r.name))).map((r) => ({
+    id: idFn(), name: r.name, emoji: r.emoji, portions: r.portions, meals: r.meals || [],
+    // an ingredient with no matching food is dropped rather than left dangling
+    items: r.items
+      .map(([name, servings]) => ({ foodId: idByName.get(key(name)), servings }))
+      .filter((it) => it.foodId),
+  }));
+
+  return {
+    foods: allFoods,
+    recipes: [...newRecipes, ...(recipes || [])],
+    addedFoods: newFoods.length,
+    addedRecipes: newRecipes.length,
+  };
+}
+
 /** Materialize the pack with real ids (idFn injected so it's testable). */
 export function makeStarterLibrary(idFn: () => string): { foods: any[]; recipes: any[] } {
   const foods = STARTER_FOODS.map((f) => ({ id: idFn(), favorite: false, fiber: 0, sugar: 0, ...f }));

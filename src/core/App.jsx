@@ -25,7 +25,7 @@ import { generatePlan, takeFromPantry, returnToPantry, reconcileTaken, recipeCon
 import { remainingGap } from '../lib/pyramid';
 import { DEFAULT_MEALS, DEFAULT_SHOPPING, addMeal, kindForTime, migrateMeals, minutesOf, slotsOf, dueMealReminders, dueNudges, dueShoppingReminder, fireKey } from '../lib/reminders';
 import { makeSyncCode, normSyncCode, threeWayMerge, payloadsEqual, SYNC_STORES } from '../lib/sync';
-import { makeStarterLibrary, upgradeStarterLibrary, STARTER_FOODS, STARTER_RECIPES } from '../lib/starter';
+import { makeStarterLibrary, upgradeStarterLibrary, mergeStarterLibrary, STARTER_FOODS, STARTER_RECIPES } from '../lib/starter';
 import { trackOnce, trackDaily, hasFired } from '../lib/track';
 import { storage } from '../storage';
 
@@ -159,9 +159,9 @@ function Select({ value, onChange, options, labels }) {
     </select>
   );
 }
-function GhostBtn({ children, onClick, danger, active }) {
+function GhostBtn({ children, onClick, danger, active, title }) {
   return (
-    <button onClick={onClick} className="flex items-center justify-center rounded-lg transition shrink-0"
+    <button onClick={onClick} title={title} aria-label={title} className="flex items-center justify-center rounded-lg transition shrink-0"
       style={{ width: 32, height: 32, background: active ? T.limeDim : 'transparent', border: `1px solid ${active ? T.lime : T.border}`, color: danger ? '#ff6b6b' : active ? T.lime : T.muted }}
       onMouseEnter={(e) => { e.currentTarget.style.borderColor = danger ? '#ff6b6b' : T.borderHi; }}
       onMouseLeave={(e) => { e.currentTarget.style.borderColor = active ? T.lime : T.border; }}>
@@ -1707,7 +1707,21 @@ function CoachView({ settings, setSettings, log, workouts, weights, setWeights }
 }
 
 /* ---------------- LIBRARY / RECIPES / SETTINGS ---------------- */
-function LibraryModal({ open, onClose, foods, addFood, updFood, delFood }) {
+/* An empty library is a dead end — the pack is the way out of it. */
+function StarterPrompt({ onAdd, what }) {
+  return (
+    <div className="rounded-xl p-4 text-center mb-3" style={{ background: T.bg, border: `1px dashed ${T.borderHi}` }}>
+      <Sparkles size={20} className="mx-auto mb-2" style={{ color: T.lime }} />
+      <div className="text-sm mb-1" style={{ color: T.text, fontWeight: 700 }}>Nothing here yet</div>
+      <div className="text-xs mb-3" style={{ color: T.muted, lineHeight: 1.55 }}>
+        Load the starter pack — {STARTER_FOODS.length} everyday whole foods with real macros and {STARTER_RECIPES.length} meals built from them. Edit or delete any of it.
+      </div>
+      <PrimaryBtn onClick={onAdd} full><Sparkles size={15} /> Add the starter pack</PrimaryBtn>
+      <div className="text-xs mt-2" style={{ color: T.faint }}>Or build your own {what} with “new” above.</div>
+    </div>
+  );
+}
+function LibraryModal({ open, onClose, foods, addFood, updFood, delFood, onAddStarterPack }) {
   const [q, setQ] = useState('');
   const list = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -1719,7 +1733,9 @@ function LibraryModal({ open, onClose, foods, addFood, updFood, delFood }) {
         <div className="relative flex-1"><Search size={15} className="absolute" style={{ left: 10, top: 11, color: T.faint }} /><input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search foods…" className="w-full rounded-lg pl-8 pr-3 py-2 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text }} /></div>
         <button onClick={() => addFood({ id: uid(), name: 'New food', category: CATEGORIES[0], protein: 0, carbs: 0, fat: 0, favorite: false })} className="flex items-center gap-1 rounded-lg px-3 py-2 text-sm transition shrink-0" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700 }}><Plus size={15} /> new</button>
       </div>
-      {foods.length === 0 && <div className="text-center py-6 text-sm" style={{ color: T.faint }}>No saved foods yet. Foods you log or add to groceries (with “save to library” on) show up here.</div>}
+      {foods.length === 0 && (onAddStarterPack
+        ? <StarterPrompt onAdd={onAddStarterPack} what="foods" />
+        : <div className="text-center py-6 text-sm" style={{ color: T.faint }}>No saved foods yet. Foods you log or add to groceries (with “save to library” on) show up here.</div>)}
       <div className="flex flex-col gap-2">
         {list.map((fd) => (
           <div key={fd.id} className="rounded-xl p-2.5" style={{ background: T.bg, border: `1px solid ${T.border}` }}>
@@ -1745,7 +1761,7 @@ function LibraryModal({ open, onClose, foods, addFood, updFood, delFood }) {
     </Modal>
   );
 }
-function RecipesModal({ open, onClose, recipes, setRecipes, foods }) {
+function RecipesModal({ open, onClose, recipes, setRecipes, foods, onAddStarterPack }) {
   const [editing, setEditing] = useState(null); // recipe id
   const [pick, setPick] = useState('');
   const addRecipe = () => { const r = { id: uid(), name: 'New recipe', emoji: '🍳', items: [] }; setRecipes((rs) => [r, ...rs]); setEditing(r.id); };
@@ -1757,7 +1773,9 @@ function RecipesModal({ open, onClose, recipes, setRecipes, foods }) {
         <div className="text-xs" style={{ color: T.faint }}>Combos of library foods — log or plan them in one tap.</div>
         <button onClick={addRecipe} className="flex items-center gap-1 rounded-lg px-3 py-2 text-sm shrink-0" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700 }}><Plus size={15} /> new</button>
       </div>
-      {recipes.length === 0 && <div className="text-center py-6 text-sm" style={{ color: T.faint }}>No recipes yet.</div>}
+      {recipes.length === 0 && (onAddStarterPack
+        ? <StarterPrompt onAdd={onAddStarterPack} what="recipes" />
+        : <div className="text-center py-6 text-sm" style={{ color: T.faint }}>No recipes yet.</div>)}
       <div className="flex flex-col gap-2">
         {recipes.map((r) => {
           const m = recipeMacros(r, foods);
@@ -1922,6 +1940,61 @@ function MealScheduleModal({ open, onClose, settings, setSettings }) {
     </Modal>
   );
 }
+/* iOS gives a home-screen app its own storage, separate from Safari. Installing
+   after setup therefore looks like a factory reset: locked out, empty, unsynced.
+   Nothing can move data across that boundary, so the app pushes people to
+   install FIRST and, failing that, tells them exactly how to carry it over. */
+const isStandalone = () => {
+  try {
+    return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true;
+  } catch { return false; }
+};
+const isIOS = () => {
+  try {
+    return /iPad|iPhone|iPod/.test(navigator.userAgent)
+      || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS lies
+  } catch { return false; }
+};
+
+/** Install invitation. Native prompt where the browser offers one, plain
+ *  instructions on iOS where it never does. */
+function InstallCard({ onDone, compact }) {
+  const [prompt, setPrompt] = useState(null);
+  const [dismissed, setDismissed] = useState(false);
+  useEffect(() => {
+    const onBip = (e) => { e.preventDefault(); setPrompt(e); };
+    window.addEventListener('beforeinstallprompt', onBip);
+    return () => window.removeEventListener('beforeinstallprompt', onBip);
+  }, []);
+  if (isStandalone() || dismissed) return null;
+  const ios = isIOS();
+  if (!prompt && !ios) return null; // desktop browsers that won't install: don't nag
+  const install = async () => {
+    if (!prompt) return;
+    prompt.prompt();
+    try { await prompt.userChoice; } catch {}
+    setPrompt(null);
+    if (onDone) onDone();
+  };
+  return (
+    <div className="rounded-xl p-3.5 mb-3" style={{ background: T.limeDim, border: '1px solid rgba(203,255,58,0.4)' }}>
+      <div className="flex items-start gap-2.5">
+        <Download size={16} style={{ color: T.lime, marginTop: 2, flexShrink: 0 }} />
+        <div className="min-w-0 flex-1">
+          <div className="text-sm" style={{ color: T.text, fontWeight: 700 }}>Install it before you set up</div>
+          <div className="text-xs mt-1" style={{ color: T.muted, lineHeight: 1.55 }}>
+            {ios
+              ? <>Tap <b style={{ color: T.text }}>Share</b> then <b style={{ color: T.text }}>Add to Home Screen</b>. Do this first — iPhone treats the installed app as a separate space, so anything you set up in Safari won't be there.</>
+              : <>It runs like a normal app and works offline. Doing this first saves you setting up twice.</>}
+          </div>
+          {prompt && <div className="mt-2.5"><PrimaryBtn onClick={install} full><Download size={15} /> Install app</PrimaryBtn></div>}
+          {!compact && <button onClick={() => setDismissed(true)} className="text-xs mt-2" style={{ color: T.faint }}>Not now</button>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* Shown when a device has never been invited. Sign up here and the invite
    lands by email; paste the key from an older email to unlock straight away. */
 function InviteGate({ onUnlocked }) {
@@ -1956,7 +2029,7 @@ function InviteGate({ onUnlocked }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: k }),
       });
       const d = await r.json();
-      if (d.ok) { onUnlocked(); return; }
+      if (d.ok) { try { localStorage.setItem('mf2_key', k); } catch {} onUnlocked(); return; }
       setState(''); setErr(d.error === 'this invite has been used on too many devices' ? d.error : 'That key isn’t valid. Check the email it came in.');
     } catch {
       setState(''); setErr('Couldn’t reach the server — check your connection.');
@@ -1989,10 +2062,28 @@ function InviteGate({ onUnlocked }) {
           </Card>
         ) : (
           <Card>
-            <div style={{ ...display, fontSize: 20, marginBottom: 6 }}>INVITE-ONLY BETA</div>
-            <div className="text-sm mb-4" style={{ color: T.muted, lineHeight: 1.6 }}>
-              MacroForge is the macro tracker that starts at the grocery store. It's free and in closed beta — drop your email and the invite comes straight back.
-            </div>
+            {isStandalone() ? (
+              <>
+                <div style={{ ...display, fontSize: 20, marginBottom: 6 }}>ONE STEP TO FINISH</div>
+                <div className="text-sm mb-3" style={{ color: T.muted, lineHeight: 1.6 }}>
+                  The installed app is its own space, so it needs your invite key once. It's in the email that let you in — or paste it below.
+                </div>
+                <button onClick={() => setShowKey(true)} className="w-full rounded-xl py-2.5 text-sm mb-3" style={{ background: T.limeDim, border: '1px solid rgba(203,255,58,0.45)', color: T.lime, fontWeight: 700 }}>
+                  I have my invite key
+                </button>
+                <div className="text-xs mb-3" style={{ color: T.faint, lineHeight: 1.6 }}>
+                  Already had data in your browser? Unlock here first, then go to <b style={{ color: T.muted }}>Settings → Device sync</b> and enter your sync code to pull it across.
+                </div>
+                <div className="text-xs" style={{ color: T.faint }}>Lost the email? Enter your address and we'll resend it:</div>
+              </>
+            ) : (
+              <>
+                <div style={{ ...display, fontSize: 20, marginBottom: 6 }}>INVITE-ONLY BETA</div>
+                <div className="text-sm mb-4" style={{ color: T.muted, lineHeight: 1.6 }}>
+                  MacroForge is the macro tracker that starts at the grocery store. It's free and in closed beta — drop your email and the invite comes straight back.
+                </div>
+              </>
+            )}
             <div className="flex flex-col gap-2">
               <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" inputMode="email" autoComplete="email" placeholder="you@example.com"
                 onKeyDown={(e) => { if (e.key === 'Enter') join(); }}
@@ -2204,8 +2295,24 @@ function SyncModal({ open, onClose, meta, status, onCreate, onJoin, onSyncNow, o
     setJoining(false);
     if (err) setJoinErr(err); else onClose();
   };
+  /* A second device needs BOTH: the invite key to get past the gate, and the
+     sync code to pull the history. Missing either one strands people, and the
+     invite key is buried in an email by the time they need it. */
+  const inviteKey = (() => { try { return localStorage.getItem('mf2_key') || ''; } catch { return ''; } })();
   return (
     <Modal open={open} onClose={onClose} title="Device sync" icon={<RefreshCw size={16} style={{ color: T.lime }} />}>
+      {inviteKey && (
+        <div className="rounded-xl p-3 mb-3" style={{ background: T.bg, border: `1px dashed ${T.borderHi}` }}>
+          <div className="text-xs mb-1.5" style={{ color: T.muted, lineHeight: 1.55 }}>
+            Setting up another device — or installing this app to your home screen? It asks for your <b style={{ color: T.text }}>invite key</b> first:
+          </div>
+          <button onClick={() => { try { navigator.clipboard.writeText(inviteKey); setCopied('key'); setTimeout(() => setCopied(false), 1500); } catch {} }}
+            className="w-full flex items-center justify-between rounded-lg px-3 py-2" style={{ background: T.panel2, border: `1px solid ${T.border}` }}>
+            <span style={{ ...mono, fontSize: 13, color: T.text }}>{inviteKey}</span>
+            <span className="text-xs" style={{ color: T.lime, fontWeight: 700 }}>{copied === 'key' ? 'copied' : 'copy'}</span>
+          </button>
+        </div>
+      )}
       {!meta?.code ? (
         <>
           <div className="text-xs mb-4" style={{ color: T.muted, lineHeight: 1.6 }}>
@@ -2285,7 +2392,7 @@ function FeedbackModal({ open, onClose }) {
     </Modal>
   );
 }
-function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onManageSync, syncLinked, onSendFeedback, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, foodCount, recipeCount, logCount }) {
+function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onManageSync, syncLinked, onSendFeedback, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, onAddStarterPack, foodCount, recipeCount, logCount }) {
   const [confirm, setConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef(null);
@@ -2306,6 +2413,7 @@ function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onMana
         <Row icon={<RefreshCw size={18} />} label="Device sync" sub={syncLinked ? 'Linked — phone & desktop share one history' : 'Local only — link your other devices'} onClick={onManageSync} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<MessageSquare size={18} />} label="Send feedback" sub="Bugs, walls, wishes — straight to the builder" onClick={onSendFeedback} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         {hasAdmin && <Row icon={<ScanLine size={18} />} label="Unknown-food reports" sub="Developer — barcodes the app had no knowledge of" onClick={onViewReports} right={<ChevronRight size={16} style={{ color: T.faint }} />} />}
+        {onAddStarterPack && <Row icon={<Sparkles size={18} />} label="Add the starter pack" sub={`${STARTER_FOODS.length} whole foods + ${STARTER_RECIPES.length} meals — skips anything you already have`} onClick={onAddStarterPack} />}
         <Row icon={<Download size={18} />} label="Export all data (JSON)" sub="Download a backup of everything" onClick={onExport} />
         <Row icon={<Upload size={18} />} label="Import data (JSON)" sub="Restore a v1 or v2 backup" onClick={() => fileRef.current && fileRef.current.click()} />
         <input ref={fileRef} type="file" accept="application/json,.json" style={{ display: 'none' }} onChange={(e) => { const f = e.target.files && e.target.files[0]; if (f) onImport(f); e.target.value = ''; }} />
@@ -2368,6 +2476,7 @@ function OnboardingModal({ open, onDone, settings, setSettings, onAddStarterPack
           <div className="text-sm mb-4" style={{ color: T.muted, lineHeight: 1.6 }}>
             Most macro apps start at the plate. This one starts at the store — it builds your meals from the food you'll actually have, scores barcodes against what your week still needs, and learns your real maintenance calories from your own logs.
           </div>
+          <InstallCard compact />
           <div className="rounded-xl p-3 mb-4" style={{ background: T.bg, border: `1px dashed ${T.borderHi}` }}>
             <div className="text-xs" style={{ color: T.muted, lineHeight: 1.55 }}>Two minutes of setup and the whole thing works. Everything lives on this device — no account, no password.</div>
           </div>
@@ -2515,6 +2624,7 @@ export default function App() {
   const [syncStatus, setSyncStatus] = useState({ busy: false, error: '' });
   const [adminToken, setAdminToken] = useState(() => { try { return localStorage.getItem('mf2_adminToken') || ''; } catch { return ''; } });
   const [notice, setNotice] = useState('');
+  const [updateReady, setUpdateReady] = useState(false);
   const meals = mealsOf(settings);
   /* schedules saved by earlier builds used ids the log never referenced */
   useEffect(() => {
@@ -2536,6 +2646,8 @@ export default function App() {
       .then((d) => {
         if (!d.ok) return;
         setInvited(true);
+        // keep it: installing the app needs it again, and the email gets buried
+        try { localStorage.setItem('mf2_key', key); } catch {}
         // don't leave the key sitting in the address bar to be copied around
         try { history.replaceState(null, '', location.pathname); } catch {}
       })
@@ -2680,12 +2792,17 @@ export default function App() {
     onboardChecked.current = true;
     if (!onboarded && foods.length === 0 && log.length === 0) setOnboardOpen(true);
   }, [ready, onboarded, foods.length, log.length]);
+  /* Safe to run at any point, including on a library that already has things
+     in it — anything already present by name is left exactly as it is. */
   const addStarterPack = () => {
-    const lib = makeStarterLibrary(uid);
-    setFoods((fs) => [...lib.foods, ...fs]);
-    setRecipes((rs) => [...lib.recipes, ...rs]);
+    const merged = mergeStarterLibrary(foods, recipes, uid);
+    setFoods(merged.foods);
+    setRecipes(merged.recipes);
     setSeedState('added');
     setSeedVersion(2);
+    setNotice(merged.addedFoods || merged.addedRecipes
+      ? `Added ${merged.addedFoods} food${merged.addedFoods === 1 ? '' : 's'} and ${merged.addedRecipes} recipe${merged.addedRecipes === 1 ? '' : 's'}.`
+      : 'You already have the whole starter pack.');
   };
   /* early installs got a smaller pack whose recipes had no meal tags — top up
      the staples they're missing and tag the dishes, once, additively */
@@ -2835,6 +2952,26 @@ export default function App() {
     { id: 'coach', label: 'Coach', Icon: Target },
   ];
   useEffect(() => { if (notice) { const t = setTimeout(() => setNotice(''), 4000); return () => clearTimeout(t); } }, [notice]);
+  /* Shipping a fix doesn't help if nobody restarts the app. An installed PWA can
+     sit on one version for days, so check for a new build whenever it comes to
+     the foreground and offer the reload rather than doing it under their hands. */
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return;
+    let stop = () => {};
+    const hadController = !!navigator.serviceWorker.controller;
+    const onControllerChange = () => { if (hadController) setUpdateReady(true); };
+    navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+    navigator.serviceWorker.getRegistration().then((reg) => {
+      if (!reg) return;
+      const check = () => { reg.update().catch(() => {}); };
+      check();
+      const iv = setInterval(check, 30 * 60 * 1000);
+      const onVis = () => { if (document.visibilityState === 'visible') check(); };
+      document.addEventListener('visibilitychange', onVis);
+      stop = () => { clearInterval(iv); document.removeEventListener('visibilitychange', onVis); };
+    }).catch(() => {});
+    return () => { navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange); stop(); };
+  }, []);
   // hold the gate until storage has loaded, so an invited device never flashes it
   if (ready && !invited) return <InviteGate onUnlocked={() => setInvited(true)} />;
   return (
@@ -2861,10 +2998,22 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             {streak > 1 && <div className="flex items-center gap-1 rounded-full px-2.5 py-1" style={{ background: T.limeDim, border: '1px solid rgba(203,255,58,0.35)' }}><Flame size={12} style={{ color: T.lime }} /><span style={{ ...mono, fontSize: 11, color: T.lime, fontWeight: 700 }}>{streak}d</span></div>}
-            <GhostBtn onClick={() => setSettingsOpen(true)}><Settings size={17} /></GhostBtn>
+            {/* buried in Settings, nobody found them — testers looked here first */}
+            <GhostBtn onClick={() => setRecipesOpen(true)} title="Recipes"><ChefHat size={17} /></GhostBtn>
+            <GhostBtn onClick={() => setLibraryOpen(true)} title="Food library"><BookOpen size={17} /></GhostBtn>
+            <GhostBtn onClick={() => setSettingsOpen(true)} title="Settings"><Settings size={17} /></GhostBtn>
           </div>
         </div>
         {notice && <div className="rounded-xl px-3 py-2 mt-3 text-xs fadein" style={{ background: T.limeDim, border: '1px solid rgba(203,255,58,0.4)', color: T.lime, fontWeight: 600 }}>{notice}</div>}
+        {updateReady && (
+          <div className="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 mt-3 fadein" style={{ background: T.panel, border: `1px solid ${T.borderHi}` }}>
+            <div className="flex items-center gap-2 min-w-0">
+              <Sparkles size={14} style={{ color: T.lime, flexShrink: 0 }} />
+              <span className="text-xs truncate" style={{ color: T.muted }}>A new version of MacroForge is ready.</span>
+            </div>
+            <button onClick={() => location.reload()} className="rounded-lg px-3 py-1.5 text-xs shrink-0" style={{ background: T.lime, color: '#0c0c0e', fontWeight: 800 }}>Update</button>
+          </div>
+        )}
         <div className="flex gap-1 p-1 rounded-2xl my-4" style={{ background: T.panel, border: `1px solid ${T.border}` }}>
           {tabs.map((t) => {
             const active = tab === t.id;
@@ -2909,9 +3058,10 @@ export default function App() {
         onSendFeedback={() => { setSettingsOpen(false); setFeedbackOpen(true); }}
         onViewReports={() => { setSettingsOpen(false); setReportsOpen(true); }} hasAdmin={!!adminToken}
         onExport={exportData} onImport={importFile} onCopyList={copyList} onClearAll={clearAll}
+        onAddStarterPack={() => { setSettingsOpen(false); addStarterPack(); }}
         foodCount={foods.length} recipeCount={recipes.length} logCount={log.length} />
-      <LibraryModal open={libraryOpen} onClose={() => setLibraryOpen(false)} foods={foods} addFood={addFood} updFood={updFood} delFood={delFood} />
-      <RecipesModal open={recipesOpen} onClose={() => setRecipesOpen(false)} recipes={recipes} setRecipes={setRecipes} foods={foods} />
+      <LibraryModal open={libraryOpen} onClose={() => setLibraryOpen(false)} foods={foods} addFood={addFood} updFood={updFood} delFood={delFood} onAddStarterPack={addStarterPack} />
+      <RecipesModal open={recipesOpen} onClose={() => setRecipesOpen(false)} recipes={recipes} setRecipes={setRecipes} foods={foods} onAddStarterPack={addStarterPack} />
       <MealScheduleModal open={scheduleOpen} onClose={() => setScheduleOpen(false)} settings={settings} setSettings={setSettings} />
       <ReportsModal open={reportsOpen} onClose={() => setReportsOpen(false)} token={adminToken} localUnknowns={unknownScans} />
       <SyncModal open={syncOpen} onClose={() => setSyncOpen(false)} meta={syncMeta} status={syncStatus}

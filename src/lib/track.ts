@@ -7,6 +7,27 @@
 
 const SRC_KEY = 'mf2_src';
 const DONE_KEY = 'mf2_ev';
+const DID_KEY = 'mf2_did';
+const DAY_KEY = 'mf2_evday';
+
+/* A random, meaningless id for this device — the only way to count one person
+   as one person. It identifies nothing: no email, no name, not derived from
+   anything about the device, and it never leaves this origin. Without it the
+   count keys on IP address, which changes on mobile and inflates every number. */
+function deviceId(): string {
+  try {
+    let id = localStorage.getItem(DID_KEY);
+    if (!id) {
+      const b = new Uint8Array(8);
+      (crypto || window.crypto).getRandomValues(b);
+      id = Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
+      localStorage.setItem(DID_KEY, id);
+    }
+    return id;
+  } catch {
+    return '';
+  }
+}
 
 /** Work out the traffic source from a page's own context.
  *  A campaign tag wins; otherwise the referring site's host; otherwise direct.
@@ -51,7 +72,7 @@ export const hasFired = (event: string): boolean => Boolean(fired()[event]);
 export function track(event: string): void {
   try {
     const source = captureSource();
-    const body = JSON.stringify({ event, source });
+    const body = JSON.stringify({ event, source, did: deviceId() });
     // sendBeacon survives the page being closed mid-request; fetch is the fallback
     if (navigator.sendBeacon) {
       navigator.sendBeacon('/api/track', new Blob([body], { type: 'application/json' }));
@@ -68,6 +89,20 @@ export function trackOnce(event: string): void {
     if (done[event]) return;
     done[event] = Date.now();
     localStorage.setItem(DONE_KEY, JSON.stringify(done));
+    track(event);
+  } catch { /* ignore */ }
+}
+
+/** Fire at most once per device per day — "days active", not "times opened".
+ *  Opening the app twenty times in an afternoon is one person, one day. */
+export function trackDaily(event: string): void {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    let seen: Record<string, string> = {};
+    try { seen = JSON.parse(localStorage.getItem(DAY_KEY) || '{}'); } catch { /* reset below */ }
+    if (seen[event] === today) return;
+    seen[event] = today;
+    localStorage.setItem(DAY_KEY, JSON.stringify(seen));
     track(event);
   } catch { /* ignore */ }
 }

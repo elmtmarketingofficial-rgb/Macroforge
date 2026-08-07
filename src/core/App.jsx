@@ -26,7 +26,7 @@ import { remainingGap } from '../lib/pyramid';
 import { DEFAULT_MEALS, DEFAULT_SHOPPING, addMeal, kindForTime, migrateMeals, minutesOf, slotsOf, dueMealReminders, dueNudges, dueShoppingReminder, fireKey } from '../lib/reminders';
 import { makeSyncCode, normSyncCode, threeWayMerge, payloadsEqual, SYNC_STORES } from '../lib/sync';
 import { makeStarterLibrary, upgradeStarterLibrary, STARTER_FOODS, STARTER_RECIPES } from '../lib/starter';
-import { track, trackOnce, hasFired } from '../lib/track';
+import { trackOnce, trackDaily, hasFired } from '../lib/track';
 import { storage } from '../storage';
 
 /* Barcode scanner loads lazily — camera + decoder stay out of the main bundle */
@@ -2549,7 +2549,7 @@ export default function App() {
     counted.current = true;
     const seen = hasFired('app_new');
     trackOnce('app_new');
-    if (seen) track('app_open');
+    if (seen) trackDaily('app_open'); // days active, not times opened
     const onInstalled = () => trackOnce('install');
     window.addEventListener('appinstalled', onInstalled);
     return () => window.removeEventListener('appinstalled', onInstalled);

@@ -33,15 +33,21 @@ const cleanSource = (src) => {
   return s || 'direct';
 };
 
-const visitorHash = (req, day) => {
-  const ip = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-  const ua = String(req.headers['user-agent'] || '');
+/* One device should count as one visitor. The browser's random device id does
+   that reliably; an IP-derived hash does not, because a phone changes IP as it
+   moves and each change would look like a new person. The id is salted and
+   hashed here so what's stored is opaque even to us, and it stays stable across
+   days so a returning visitor isn't counted twice. */
+const visitorHash = (req, did) => {
   const salt = process.env.ADMIN_TOKEN || 'macroforge';
-  return createHash('sha256').update(`${day}|${ip}|${ua}|${salt}`).digest('hex').slice(0, 16);
+  if (did) return createHash('sha256').update(`d|${did}|${salt}`).digest('hex').slice(0, 16);
+  const ip = String(req?.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  const ua = String(req?.headers['user-agent'] || '');
+  return createHash('sha256').update(`n|${ip}|${ua}|${salt}`).digest('hex').slice(0, 16);
 };
 
 /** Record one event. Safe to call from other endpoints (see api/signup.js). */
-export async function record({ event, source, req }) {
+export async function record({ event, source, req, did }) {
   if (!configured || !EVENT_SET.has(event)) return;
   const day = dayKey();
   const src = cleanSource(source);
@@ -51,19 +57,19 @@ export async function record({ event, source, req }) {
     redis('EXPIRE', `mf:an:d:${day}`, TTL),
     redis('EXPIRE', `mf:an:s:${day}`, TTL),
   ]);
-  if (req && (event === 'join_view' || event === 'app_new' || event === 'app_open')) {
-    await redis('PFADD', `mf:an:u:${day}`, visitorHash(req, day));
+  if (event === 'join_view' || event === 'app_new' || event === 'app_open') {
+    await redis('PFADD', `mf:an:u:${day}`, visitorHash(req, did));
     await redis('EXPIRE', `mf:an:u:${day}`, TTL);
   }
 }
 
 export default async function handler(req, res) {
   if (req.method === 'POST') {
-    const { event, source } = req.body || {};
+    const { event, source, did } = req.body || {};
     if (!EVENT_SET.has(event)) return res.status(400).json({ error: 'unknown event' });
     if (!configured) return res.status(202).json({ ok: false });
     try {
-      await record({ event, source, req });
+      await record({ event, source, req, did: String(did || '').replace(/[^a-f0-9]/g, '').slice(0, 32) });
     } catch { /* analytics must never break the page it measures */ }
     return res.status(200).json({ ok: true });
   }
@@ -102,10 +108,13 @@ export default async function handler(req, res) {
       }
     }
 
-    const totals = { uniques: 0 };
+    const totals = {};
     for (const d of perDay) {
-      for (const k of ['uniques', ...EVENTS]) totals[k] = (totals[k] || 0) + (d[k] || 0);
+      for (const k of EVENTS) totals[k] = (totals[k] || 0) + (d[k] || 0);
     }
+    /* Distinct people over the whole window — the union of the daily sets, not
+       the sum of them. Summing counts a visitor again for every day they came back. */
+    totals.uniques = Number(await redis('PFCOUNT', ...dates.map((d) => `mf:an:u:${d}`))) || 0;
 
     const sources = Object.values(bySource).sort((a, b) => (b.join_view || 0) - (a.join_view || 0));
     return res.status(200).json({ days: perDay, sources, totals, events: EVENTS });

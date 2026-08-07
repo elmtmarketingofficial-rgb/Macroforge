@@ -203,8 +203,20 @@
           return src;
         } catch (e) { return 'direct'; }
       }
+      /* random per-device id so one person counts once, however often they visit */
+      function did() {
+        try {
+          var id = localStorage.getItem('mf2_did');
+          if (!id) {
+            var b = new Uint8Array(8); crypto.getRandomValues(b);
+            id = Array.prototype.map.call(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+            localStorage.setItem('mf2_did', id);
+          }
+          return id;
+        } catch (e) { return ''; }
+      }
       try {
-        var body = JSON.stringify({ event: 'join_view', source: source() });
+        var body = JSON.stringify({ event: 'join_view', source: source(), did: did() });
         if (navigator.sendBeacon) navigator.sendBeacon('/api/track', new Blob([body], { type: 'application/json' }));
         else fetch('/api/track', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: body });
       } catch (e) {}

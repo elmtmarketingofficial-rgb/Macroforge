@@ -94,7 +94,7 @@ async function sendInvite(email, inviteKey) {
 
 export default async function handler(req, res) {
   if (req.method === 'POST') {
-    const { email, device, source } = req.body || {};
+    const { email, device, source, afterload } = req.body || {};
     const e = String(email || '').trim().toLowerCase().slice(0, 120);
     if (!EMAIL_RE.test(e)) return res.status(400).json({ error: 'bad email' });
     if (!configured) return res.status(202).json({ stored: false });
@@ -114,11 +114,16 @@ export default async function handler(req, res) {
     const mayResend = !existing || Date.now() - lastSent > 3600_000;
     const invite = mayResend ? await sendInvite(e, inviteKey) : { sent: false, reason: 'invited recently' };
 
+    /* Consent to shop email is separate, opt-in, and recorded with the moment it
+       was given. Re-signing up can grant it but never silently revokes it. */
+    const shopOptIn = afterload === true;
     await redis('HSET', 'mf:signups', e, JSON.stringify({
       email: e,
       device: String(device || '').slice(0, 40) || prev.device || '',
       ts: prev.ts || Date.now(),
       lastInvite: invite.sent ? Date.now() : lastSent,
+      afterload: shopOptIn || prev.afterload === true,
+      afterloadAt: prev.afterloadAt || (shopOptIn ? Date.now() : null),
     }));
     return res.status(200).json({ stored: true, invited: invite.sent, resent: Boolean(existing && invite.sent) });
   }

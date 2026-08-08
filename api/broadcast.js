@@ -113,10 +113,15 @@ function toHtml(body) {
   }).join('');
 }
 
-const listSignups = async () => {
+/* Two audiences, and they are not interchangeable. Everyone consented to beta
+   mail about MacroForge; only people who ticked the box consented to hearing
+   about the shop. Sending shop mail to the wrong list breaks a written promise,
+   so the filter lives here rather than in whoever is composing the message. */
+const listSignups = async (audience = 'all') => {
   const vals = (await redis('HVALS', 'mf:signups')) || [];
-  return vals.map((v) => { try { return JSON.parse(v); } catch { return null; } })
+  const all = vals.map((v) => { try { return JSON.parse(v); } catch { return null; } })
     .filter((s) => s && s.email);
+  return audience === 'afterload' ? all.filter((s) => s.afterload === true) : all;
 };
 
 async function sendOne({ key, from, replyTo, to, subject, body }) {
@@ -142,12 +147,21 @@ export default async function handler(req, res) {
   if (!configured) return res.status(503).json({ error: 'storage not configured' });
 
   if (req.method === 'GET') {
-    const signups = await listSignups();
-    return res.status(200).json({ recipients: signups.length, emails: signups.map((s) => s.email) });
+    const audience = req.query?.audience === 'afterload' ? 'afterload' : 'all';
+    const signups = await listSignups(audience);
+    const everyone = await listSignups('all');
+    return res.status(200).json({
+      audience,
+      recipients: signups.length,
+      emails: signups.map((s) => s.email),
+      shopOptIns: everyone.filter((s) => s.afterload === true).length,
+      total: everyone.length,
+    });
   }
 
   if (req.method === 'POST') {
-    const { subject, body, confirmCount, testTo } = req.body || {};
+    const { subject, body, confirmCount, testTo, audience: aud } = req.body || {};
+    const audience = aud === 'afterload' ? 'afterload' : 'all';
     if (!String(subject || '').trim() || !String(body || '').trim()) {
       return res.status(400).json({ error: 'subject and body are required' });
     }
@@ -162,10 +176,11 @@ export default async function handler(req, res) {
       return res.status(ok ? 200 : 502).json({ test: true, sent: ok ? 1 : 0 });
     }
 
-    const signups = await listSignups();
+    const signups = await listSignups(audience);
     if (Number(confirmCount) !== signups.length) {
       return res.status(409).json({
         error: 'recipient count mismatch — re-check the list and send again',
+        audience,
         recipients: signups.length,
       });
     }
@@ -176,7 +191,7 @@ export default async function handler(req, res) {
       const ok = await sendOne({ key, from, replyTo, to: s.email, subject, body });
       if (ok) sent++; else failed.push(s.email);
     }
-    return res.status(200).json({ sent, failed });
+    return res.status(200).json({ audience, sent, failed });
   }
 
   res.setHeader('Allow', 'GET, POST');

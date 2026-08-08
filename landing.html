@@ -82,6 +82,10 @@
     .device-chip { background: var(--panel2); border: 1px solid var(--border); color: var(--muted); border-radius: 999px; padding: 7px 14px; font-size: 13px; font-weight: 600; cursor: pointer; font-family: inherit; }
     .device-chip.on { background: var(--lime-dim); border-color: rgba(203,255,58,0.45); color: var(--lime); }
     .fine { color: var(--faint); font-size: 12px; margin-top: 12px; }
+    .consent { display: flex; gap: 9px; align-items: flex-start; margin-top: 14px; cursor: pointer; }
+    .consent input { width: 17px; height: 17px; margin: 1px 0 0; accent-color: var(--lime); flex-shrink: 0; cursor: pointer; }
+    .consent span { color: var(--muted); font-size: 12.5px; line-height: 1.5; }
+    .consent b { color: var(--text); }
     .ok { color: var(--lime); font-weight: 700; font-size: 14px; margin-top: 12px; display: none; }
     .err { color: var(--orange); font-size: 13px; margin-top: 12px; display: none; }
     footer { padding: 46px 0 40px; color: var(--faint); font-size: 12.5px; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
@@ -172,6 +176,12 @@
             <button type="button" class="device-chip" data-v="Android">Android</button>
             <button type="button" class="device-chip" data-v="Desktop">Desktop</button>
           </div>
+          <!-- separate, unticked, and its own promise: consent for one thing is
+               not consent for the other, and it can't be granted retroactively -->
+          <label class="consent" for="afterload">
+            <input type="checkbox" id="afterload" />
+            <span>Also tell me about <b>Afterload</b> — member deals on real food and gear from our shop. Entirely optional, separate from your beta emails.</span>
+          </label>
           <div class="fine">Your email is used for the beta invite and updates about MacroForge — nothing else, no sharing, unsubscribe any time.</div>
           <div class="ok" id="ok">You're on the list — watch your inbox for the invite.</div>
           <div class="err" id="err">That didn't go through — check the email and try again.</div>
@@ -239,11 +249,11 @@
         go.disabled = true; go.textContent = 'Adding…';
         fetch('/api/signup', {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: email, device: device, source: source() })
+          body: JSON.stringify({ email: email, device: device, source: source(), afterload: document.getElementById('afterload').checked })
         }).then(function (r) {
           if (!r.ok && r.status !== 202) throw new Error('bad status');
           ok.style.display = 'block';
-          document.getElementById('f').reset();
+          document.getElementById('f').reset(); // also clears the consent box
           chips.forEach(function (x) { x.classList.remove('on'); });
         }).catch(function () { err.style.display = 'block'; })
           .finally(function () { go.disabled = false; go.textContent = 'Count me in'; });

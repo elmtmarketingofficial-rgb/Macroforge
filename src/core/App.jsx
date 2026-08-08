@@ -2003,6 +2003,7 @@ function InviteGate({ onUnlocked }) {
   const [state, setState] = useState(''); // '' | 'sending' | 'sent' | 'checking'
   const [err, setErr] = useState('');
   const [showKey, setShowKey] = useState(false);
+  const [shopOptIn, setShopOptIn] = useState(false); // must start false — silence isn't consent
 
   const join = async () => {
     const e = email.trim().toLowerCase();
@@ -2011,7 +2012,7 @@ function InviteGate({ onUnlocked }) {
     try {
       const r = await fetch('/api/signup', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: e, device: 'app-gate', source: (() => { try { return localStorage.getItem('mf2_src') || 'direct'; } catch { return 'direct'; } })() }),
+        body: JSON.stringify({ email: e, device: 'app-gate', afterload: shopOptIn, source: (() => { try { return localStorage.getItem('mf2_src') || 'direct'; } catch { return 'direct'; } })() }),
       });
       if (!r.ok && r.status !== 202) throw new Error('failed');
       setState('sent');
@@ -2091,6 +2092,14 @@ function InviteGate({ onUnlocked }) {
               <PrimaryBtn onClick={join} full>{state === 'sending' ? 'Sending…' : 'Send my invite'}</PrimaryBtn>
             </div>
             {err && <div className="text-xs mt-2.5" style={{ color: '#ff8a8a' }}>{err}</div>}
+            <button onClick={() => setShopOptIn((v) => !v)} className="flex items-start gap-2 mt-3 text-left w-full">
+              <span className="flex items-center justify-center rounded shrink-0" style={{ width: 16, height: 16, marginTop: 1, border: `1.5px solid ${shopOptIn ? T.lime : T.borderHi}`, background: shopOptIn ? T.lime : 'transparent' }}>
+                {shopOptIn && <Check size={11} style={{ color: '#0c0c0e' }} strokeWidth={3} />}
+              </span>
+              <span className="text-xs" style={{ color: T.muted, lineHeight: 1.5 }}>
+                Also tell me about <b style={{ color: T.text }}>Afterload</b> — member deals on real food and gear. Optional, separate from beta emails.
+              </span>
+            </button>
             <div className="text-xs mt-3" style={{ color: T.faint, lineHeight: 1.6 }}>
               No password, and your food data never leaves your device. Beta updates only — nothing else.
             </div>

@@ -51,6 +51,7 @@ export default function PhotoSnap({ open, onClose, mode = 'meal', mealLabel, goa
   const [img, setImg] = useState(null);        // {dataUrl, b64, media}
   const [phase, setPhase] = useState('pick');  // pick | ready | busy | done | err
   const [err, setErr] = useState('fail');
+  const [limitMsg, setLimitMsg] = useState('');
   const [analysis, setAnalysis] = useState(null);
   const [score, setScore] = useState(null);
   const [acted, setActed] = useState('');
@@ -82,10 +83,21 @@ export default function PhotoSnap({ open, onClose, mode = 'meal', mealLabel, goa
       const res = await fetch('/api/photo', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: img.b64, media: img.media, mode }),
+        // the invite key is what the daily allowance is counted against
+        body: JSON.stringify({
+          image: img.b64, media: img.media, mode,
+          key: (() => { try { return localStorage.getItem('mf2_key') || ''; } catch { return ''; } })(),
+        }),
       });
       if (!res.ok) {
-        setErr(res.status === 503 ? 'noconfig' : res.status === 429 ? 'limit' : res.status === 413 ? 'toobig' : 'fail');
+        if (res.status === 429) {
+          // the server knows whether this is a daily cap or an unrecognised device
+          const d = await res.json().catch(() => ({}));
+          setLimitMsg(d.error || ERR_TEXT.limit);
+          setErr('limit');
+        } else {
+          setErr(res.status === 503 ? 'noconfig' : res.status === 413 ? 'toobig' : 'fail');
+        }
         setPhase('err');
         return;
       }
@@ -146,7 +158,7 @@ export default function PhotoSnap({ open, onClose, mode = 'meal', mealLabel, goa
             <div className="flex items-start gap-2 rounded-xl p-3 text-xs" style={{ border: `1px dashed ${T.borderHi}`, color: T.muted, lineHeight: 1.55 }}>
               {err === 'offline' ? <WifiOff size={14} className="shrink-0" style={{ marginTop: 1 }} /> : <Camera size={14} className="shrink-0" style={{ marginTop: 1 }} />}
               <div>
-                {ERR_TEXT[err]}
+                {err === 'limit' && limitMsg ? limitMsg : ERR_TEXT[err]}
                 {err !== 'noconfig' && <button onClick={() => setPhase(img ? 'ready' : 'pick')} style={{ color: T.lime, fontWeight: 700, marginLeft: 6 }}>try again</button>}
               </div>
             </div>

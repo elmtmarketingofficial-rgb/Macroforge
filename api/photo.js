@@ -2,13 +2,25 @@
    structured nutrition estimate: dish name, per-item breakdown, totals, and the
    pyramid signals (category / processing level) the client scores locally.
    Degrades to 503 when no ANTHROPIC_API_KEY is set so the UI can say so. */
+import { createHash } from 'node:crypto';
 import Anthropic from '@anthropic-ai/sdk';
 import { configured as storeConfigured, redis } from './_store.js';
 
 export const config = { api: { bodyParser: { sizeLimit: '4mb' } } };
 
 const MEDIA_OK = new Set(['image/jpeg', 'image/png', 'image/webp']);
-const HOURLY_CAP = 25; // per IP — this endpoint spends real money per call
+
+/* Every call here spends real money, and the invite gate only guards the UI —
+   the endpoint itself is open to anyone who reads the network tab. So spend is
+   tied to an invite key instead of an address: a known key gets a working daily
+   allowance, anything else gets barely enough to try the feature once.
+
+   Deliberately not a hard rejection without a key. Devices that were using the
+   app before invite keys existed have none, and locking them out to close a
+   hole nobody has found yet is the worse trade. The per-key allowance is also
+   the switch the membership will flip: free stays here, members go unlimited. */
+const DAILY_WITH_KEY = 30;
+const DAILY_NO_KEY = 3;
 
 /* The model fills this exactly; the client never has to guess at the shape. */
 const SCHEMA = {
@@ -75,15 +87,28 @@ If nothing edible is clearly visible, set known=false and zero everything.`,
 const ipOf = (req) =>
   String(req.headers['x-forwarded-for'] || req.socket?.remoteAddress || 'unknown').split(',')[0].trim();
 
-async function overLimit(req) {
-  if (!storeConfigured) return false; // no Redis → no limiter, still works locally
+/** Count this call against whoever is making it. Returns how much is left and
+ *  whether they're a recognised invite. */
+async function checkQuota(req, rawKey) {
+  if (!storeConfigured) return { ok: true, keyed: false }; // no store → no limiter, still works locally
   try {
-    const key = `mf:photo:${ipOf(req)}:${Math.floor(Date.now() / 3600000)}`;
-    const n = await redis('INCR', key);
-    if (n === 1) await redis('EXPIRE', key, 3900);
-    return n > HOURLY_CAP;
+    const day = new Date().toISOString().slice(0, 10);
+    const key = String(rawKey || '').replace(/[^A-Za-z0-9_-]/g, '').slice(0, 32);
+    let bucket = '', cap = DAILY_NO_KEY, keyed = false;
+    if (key && (await redis('HGET', 'mf:invites', key))) {
+      // hashed so the quota keys never carry the invite around with them
+      bucket = `k:${createHash('sha256').update(key).digest('hex').slice(0, 16)}`;
+      cap = DAILY_WITH_KEY;
+      keyed = true;
+    } else {
+      bucket = `i:${ipOf(req)}`;
+    }
+    const qk = `mf:photoq:${bucket}:${day}`;
+    const n = await redis('INCR', qk);
+    if (n === 1) await redis('EXPIRE', qk, 172800);
+    return { ok: n <= cap, cap, used: n, keyed };
   } catch {
-    return false; // a broken limiter should never take the feature down
+    return { ok: true, keyed: false }; // a broken limiter shouldn't take the feature down
   }
 }
 
@@ -95,14 +120,22 @@ export default async function handler(req, res) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return res.status(503).json({ error: 'not configured', configured: false });
   }
-  const { image, media, mode } = req.body || {};
+  const { image, media, mode, key } = req.body || {};
   const mediaType = MEDIA_OK.has(media) ? media : 'image/jpeg';
   const data = String(image || '');
   if (!data || !/^[A-Za-z0-9+/=]+$/.test(data.slice(0, 120))) {
     return res.status(400).json({ error: 'bad image' });
   }
   if (data.length > 4_200_000) return res.status(413).json({ error: 'image too large' });
-  if (await overLimit(req)) return res.status(429).json({ error: 'hourly photo limit reached — try again in a bit' });
+  const quota = await checkQuota(req, key);
+  if (!quota.ok) {
+    return res.status(429).json({
+      error: quota.keyed
+        ? `That's ${quota.cap} photos today — the daily limit resets tomorrow.`
+        : 'Photo analysis is for invited testers. Open the app from your invite link and try again.',
+      keyed: quota.keyed,
+    });
+  }
 
   const client = new Anthropic();
   try {

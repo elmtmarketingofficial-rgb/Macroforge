@@ -8,11 +8,7 @@ when a broadcast goes out and record that send below.*
 
 ## Unannounced — goes in the next email
 
-**Photo logging is live.** Snap a plate and get a macro estimate broken down by
-component. Two ways in: the camera button next to "Add food" on Today, and
-"No barcode? Snap a photo instead" inside the barcode scanner — that second one
-is for deli counters, bakery items, anything without a label. Estimates are
-approximate by nature; the app says so rather than pretending otherwise.
+*(nothing yet)*
 
 ---
 
@@ -32,6 +28,13 @@ wonders whether it was forgotten:
 ---
 
 ## Sent
+
+**8 Aug 2026 — "Photo logging is live - point your camera at dinner"** →
+2 recipients, both delivered. Covered photo logging, split by intent: log a
+plate you're eating (Today tab) vs get a buy/skip verdict on something with no
+barcode (scanner). Framed around accuracy honestly, and asked for wrong answers
+as feedback. Carried a direct activation ask — photograph tonight's dinner —
+because the funnel still shows nobody has logged food.
 
 **7 Aug 2026 — "MacroForge beta - what changed this week"** → 2 recipients, both
 delivered. Covered: Recipes and Food library moved into the header; starter pack

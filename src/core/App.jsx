@@ -2663,10 +2663,13 @@ export default function App() {
       .catch(() => {});
   }, [ready, invited, onboarded, adminToken]);
   /* funnel: counts only — which channel brought someone, and how far they got.
-     Waits for storage so a brand-new device isn't miscounted as returning. */
+     Waits for storage so a brand-new device isn't miscounted as returning, and
+     waits for `invited` so this counts people who actually got into the app.
+     Firing on page load instead counted every crawler and every bounce off the
+     gate, which buried the real numbers under an order of magnitude of noise. */
   const counted = useRef(false);
   useEffect(() => {
-    if (!ready || counted.current) return;
+    if (!ready || !invited || counted.current) return;
     counted.current = true;
     const seen = hasFired('app_new');
     trackOnce('app_new');
@@ -2674,11 +2677,13 @@ export default function App() {
     const onInstalled = () => trackOnce('install');
     window.addEventListener('appinstalled', onInstalled);
     return () => window.removeEventListener('appinstalled', onInstalled);
-  }, [ready]);
+    // `invited` matters: someone who redeems their key mid-session flips it to
+    // true, and without it here that person would never be counted at all
+  }, [ready, invited]);
   /* activation: first food ever logged on this device, whichever way it got there */
   useEffect(() => {
-    if (ready && log.length) trackOnce('first_log');
-  }, [ready, log.length]);
+    if (ready && invited && log.length) trackOnce('first_log');
+  }, [ready, invited, log.length]);
   /* developer token arrives via #admin=TOKEN in the URL */
   useEffect(() => {
     const m = /^#admin=(.+)$/.exec(window.location.hash || '');

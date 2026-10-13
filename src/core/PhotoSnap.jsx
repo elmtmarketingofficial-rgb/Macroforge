@@ -17,7 +17,10 @@ const VERDICT_STYLE = {
 
 const ERR_TEXT = {
   offline: "You're offline — photo analysis needs a connection.",
-  noconfig: 'Photo analysis isn’t switched on for this beta yet — coming very soon. Log it manually for now.',
+  /* Covers both "never configured" and "the balance ran dry", because the API
+     reports them identically. It must not read as "coming soon" — testers were
+     told in August that this was live, and it has since gone dark twice. */
+  noconfig: 'Photo analysis is temporarily unavailable — nothing wrong on your end. Log it manually for now and try again in a day or two.',
   limit: 'Hourly photo limit reached — give it a little while and try again.',
   toobig: 'That photo is too large even after compression — try again a bit further back.',
   fail: 'Couldn’t analyze that one — bad signal or a hiccup on our side.',

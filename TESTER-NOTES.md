@@ -8,7 +8,14 @@ when a broadcast goes out and record that send below.*
 
 ## Unannounced — goes in the next email
 
-*(nothing yet)*
+**Photo logging is back on (9 Nov).** They were told on 8 Aug it was live; it went dark
+from roughly early September because the credits ran out, and anyone who tried it got a
+"not available" message instead. Worth owning that plainly rather than pretending it never
+happened — it is working again, verified on production.
+
+**Nothing to unlock any more.** The app now opens for anyone, so anyone they share it
+with can just use it. Their own access is unchanged. (Whether to mention this is a
+judgement call — it matters more for sharing than for them.)
 
 ---
 

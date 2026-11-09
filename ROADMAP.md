@@ -151,7 +151,8 @@ self-inflicted, and an app store does not fix it. Both are in the table.
 | Item | Owner | Status |
 |---|---|---|
 | **Remove access friction — the invite gate** | Ethan decided, Claude Code built | **done 9 Nov** — gate removed, email now an optional card after first log; verified on production |
-| **Store listing — Google Play** | Ethan: $25 + Play Console account. Claude Code: package + listing | **in progress 9 Nov** — decided: Android now, iPhone after first activation numbers |
+| **Read the open-access funnel** | Claude Code | **due 23 Nov 2026** — first numbers ever taken without the invite gate; they decide whether a store listing is still needed |
+| **Store listing** | Ethan decides | **on hold until the 23 Nov read** (decided 9 Nov). If it goes ahead, iPhone first — see open question 6 |
 | Read the funnel post-`560b76f` and record it above | Claude Code | **done 13 Oct, again 9 Nov** |
 | Add Anthropic credits → photo logging on | Ethan | **done again 9 Nov** (verified 200) |
 | Real screenshots from a phone with real data | Ethan | open since 7 Aug |
@@ -274,8 +275,22 @@ outside this file and need someone with edit rights on them:
    email sign up first"). On 7–8 Nov he named access hassle as the reason
    nobody uses the app. Those pull against each other; reversing his own
    instruction is his call. *Raised 9 Nov.*
-6. ~~**Which store listings.**~~ **DECIDED 9 Nov: Android now, iPhone later.** Google Play is $25 once; Apple is
-   $99 a year. Rent is the live constraint. 3 of the 4 signups with a known
+6. ~~**Which store listings.**~~ **DECIDED 9 Nov: hold all stores ~2 weeks and measure.**
+   Briefly decided as "Android now" the same day, on a claim from this side that Android
+   would take "days not weeks" — **that was wrong and was corrected before anything was
+   spent.** Facts that drove the reversal, so they are not re-derived:
+   - Google Play makes personal developer accounts created after Nov 2023 run a closed
+     test with **12+ testers opted in for 14 consecutive days** before going public
+     (Play Console Help, answer 14151465). MacroForge has one Android user. Organization
+     accounts are exempt but need a D-U-N-S number, and the business name is shown
+     publicly as the developer.
+   - Android already installs in about one tap: Chrome offers "Install app" for the PWA.
+     **The download hassle is an iPhone problem** (Safari has no install prompt), and 3 of
+     4 known signup devices are iPhone. So if a store is bought, it should be Apple's
+     ($99/yr, no tester gate, review usually 1–2 days; risk of a guideline-4.2 rejection
+     for a plain web wrapper, so it needs native push + camera).
+   Original framing, kept for the record: Google Play is $25 once; Apple is
+   $99 a year. Spend is being held down for now. 3 of the 4 signups with a known
    device are iPhone, so Android-first serves the minority and iOS is the
    expensive one. *Raised 9 Nov.*
 7. **Afterload's launch shape** — compromise/dropship start versus a tiny

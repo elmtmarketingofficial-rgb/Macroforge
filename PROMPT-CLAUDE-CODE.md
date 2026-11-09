@@ -50,8 +50,11 @@ to that first log — not new features.
 2. **Email consent is split and enforced in `api/broadcast.js`.** Beta mail goes
    to everyone; Afterload shop mail only to people who ticked the box. Don't
    route around that filter.
-3. **Never email the real testers without me saying so explicitly.** Test sends
-   to my own address are fine; broadcasts need my go-ahead each time.
+3. **Never email the real testers without me saying so explicitly.** Broadcasts
+   need my go-ahead each time. Test sends and test signups go to
+   **ethan@macroforge.club** only — never my ELM Tree Marketing Gmail or a
+   `+alias` of it. The two businesses' inboxes do not mix; MacroForge mail in the
+   ELMTM inbox is exactly the confusion the separate mailbox exists to prevent.
 4. **Clean up test data.** Test signups, invite keys and analytics rows from
    verification runs get removed afterwards — the funnel numbers must mean
    something. Real user data is never wiped to tidy up test noise.

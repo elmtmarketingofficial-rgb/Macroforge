@@ -8,14 +8,7 @@ when a broadcast goes out and record that send below.*
 
 ## Unannounced — goes in the next email
 
-**Photo logging is back on (9 Nov).** They were told on 8 Aug it was live; it went dark
-from roughly early September because the credits ran out, and anyone who tried it got a
-"not available" message instead. Worth owning that plainly rather than pretending it never
-happened — it is working again, verified on production.
-
-**Nothing to unlock any more.** The app now opens for anyone, so anyone they share it
-with can just use it. Their own access is unchanged. (Whether to mention this is a
-judgement call — it matters more for sharing than for them.)
+*(nothing yet)*
 
 ---
 
@@ -35,6 +28,13 @@ wonders whether it was forgotten:
 ---
 
 ## Sent
+
+**9 Nov 2026 — "MacroForge: photo logging works, and you can share it now"** →
+6 recipients, all delivered — the first update to reach the 4 people who signed up
+after August. Said photo logging works and owned the Sep–Nov outage ("that was on our
+side, not yours"); said there is no invite step any more and asked them to share
+macroforge.club; asked for confusing or broken things by reply or in-app feedback.
+Framed as "works", not "is back", because 4 of the 6 were never told it existed.
 
 **8 Aug 2026 — "Photo logging is live - point your camera at dinner"** →
 2 recipients, both delivered. Covered photo logging, split by intent: log a

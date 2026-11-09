@@ -9,7 +9,7 @@ I'm Ethan. I've built and launched **MacroForge** (https://macroforge.club) — 
 macro tracker and meal planner that starts at the grocery store instead of the
 plate. You put in what you bought, or scan barcodes in the aisle, and it builds
 the week's meals from that, aimed at your macro targets. It's a local-first web
-app: no accounts, no passwords, invite-only beta, free.
+app: no accounts, no passwords, open to anyone since 9 Nov 2026 (no invite), free.
 
 **I want you to run the marketing side.** The product is finished and live; a
 separate workstream handles anything that needs code. You own strategy, content,

@@ -1995,9 +1995,15 @@ function InstallCard({ onDone, compact }) {
   );
 }
 
-/* Shown when a device has never been invited. Sign up here and the invite
-   lands by email; paste the key from an older email to unlock straight away. */
-function InviteGate({ onUnlocked }) {
+/* Optional email signup. Until 9 Nov 2026 this was a full-screen gate: nobody
+   could use the app without the email round-trip, and Ethan named that as the
+   reason nobody did. Now the app is open to anyone and this is an offer, made
+   after someone has had value from it — never a wall.
+
+   What signing up actually gets you, stated honestly in the copy: beta updates,
+   and photo scans lifted from 3 a day to 30 (the key in the email is what the
+   daily allowance counts against). It is NOT a backup — sync codes are. */
+function EmailPrompt({ onDismiss, onKeyRedeemed, inModal }) {
   const [email, setEmail] = useState('');
   const [key, setKey] = useState('');
   const [state, setState] = useState(''); // '' | 'sending' | 'sent' | 'checking'
@@ -2012,10 +2018,11 @@ function InviteGate({ onUnlocked }) {
     try {
       const r = await fetch('/api/signup', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: e, device: 'app-gate', afterload: shopOptIn, source: (() => { try { return localStorage.getItem('mf2_src') || 'direct'; } catch { return 'direct'; } })() }),
+        body: JSON.stringify({ email: e, device: 'in-app', afterload: shopOptIn, source: (() => { try { return localStorage.getItem('mf2_src') || 'direct'; } catch { return 'direct'; } })() }),
       });
       if (!r.ok && r.status !== 202) throw new Error('failed');
       setState('sent');
+      try { localStorage.setItem('mf2_emailprompt', 'sent'); } catch {}
     } catch {
       setState(''); setErr('Couldn’t reach the server — check your connection and try again.');
     }
@@ -2030,100 +2037,66 @@ function InviteGate({ onUnlocked }) {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: k }),
       });
       const d = await r.json();
-      if (d.ok) { try { localStorage.setItem('mf2_key', k); } catch {} onUnlocked(); return; }
+      if (d.ok) { try { localStorage.setItem('mf2_key', k); } catch {} onKeyRedeemed(); return; }
       setState(''); setErr(d.error === 'this invite has been used on too many devices' ? d.error : 'That key isn’t valid. Check the email it came in.');
     } catch {
       setState(''); setErr('Couldn’t reach the server — check your connection.');
     }
   };
 
-  return (
-    <div className="min-h-screen w-full flex items-center justify-center p-4" style={{ background: `radial-gradient(130% 75% at 50% -8%, ${T.limeDim}, transparent 55%), ${T.bg}`, color: T.text, fontFamily: "'Archivo', system-ui, sans-serif" }}>
-      <style>{`@import url('https://fonts.googleapis.com/css2?family=Anton&family=Archivo:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap'); input::placeholder { color: #50505a; }`}</style>
-      <div className="w-full fadein" style={{ maxWidth: 400 }}>
-        <div className="flex items-center gap-2.5 mb-6">
-          <div className="flex items-center justify-center rounded-xl" style={{ width: 40, height: 40, background: T.lime }}>
-            <Flame size={22} style={{ color: '#0c0c0e' }} />
-          </div>
-          <div>
-            <div style={{ ...display, fontSize: 22, lineHeight: 1 }}>MACROFORGE</div>
-            <div className="text-xs" style={{ color: T.faint }}>fuel · plan · train · adapt</div>
-          </div>
+  if (state === 'sent') {
+    return (
+      <div className={inModal ? '' : 'rounded-2xl p-4 mb-3 fadein'} style={inModal ? {} : { background: T.panel, border: `1px solid ${T.borderHi}` }}>
+        <div className="text-sm" style={{ color: T.text, fontWeight: 700 }}>Check your email</div>
+        <div className="text-xs mt-1" style={{ color: T.muted, lineHeight: 1.6 }}>
+          It's on its way to <b style={{ color: T.text }}>{email.trim().toLowerCase()}</b>. Tap the link in it on this phone and your 30 daily photo scans switch on. Nothing after a couple of minutes? Check spam.
         </div>
+      </div>
+    );
+  }
 
-        {state === 'sent' ? (
-          <Card>
-            <div style={{ ...display, fontSize: 20, marginBottom: 8 }}>CHECK YOUR EMAIL</div>
-            <div className="text-sm" style={{ color: T.muted, lineHeight: 1.6 }}>
-              Your invite is on its way to <b style={{ color: T.text }}>{email.trim().toLowerCase()}</b>. Open the link in it on this device and you're in.
-            </div>
-            <div className="text-xs mt-3" style={{ color: T.faint, lineHeight: 1.6 }}>
-              Signed up before? That works too — this resends your invite. Nothing after a minute or two? Check spam, then <button onClick={() => { setState(''); setShowKey(true); }} style={{ color: T.lime, fontWeight: 700 }}>enter your key by hand</button>.
-            </div>
-          </Card>
-        ) : (
-          <Card>
-            {isStandalone() ? (
-              <>
-                <div style={{ ...display, fontSize: 20, marginBottom: 6 }}>ONE STEP TO FINISH</div>
-                <div className="text-sm mb-3" style={{ color: T.muted, lineHeight: 1.6 }}>
-                  The installed app is its own space, so it needs your invite key once. It's in the email that let you in — or paste it below.
-                </div>
-                <button onClick={() => setShowKey(true)} className="w-full rounded-xl py-2.5 text-sm mb-3" style={{ background: T.limeDim, border: '1px solid rgba(203,255,58,0.45)', color: T.lime, fontWeight: 700 }}>
-                  I have my invite key
-                </button>
-                <div className="text-xs mb-3" style={{ color: T.faint, lineHeight: 1.6 }}>
-                  Already had data in your browser? Unlock here first, then go to <b style={{ color: T.muted }}>Settings → Device sync</b> and enter your sync code to pull it across.
-                </div>
-                <div className="text-xs" style={{ color: T.faint }}>Lost the email? Enter your address and we'll resend it:</div>
-              </>
-            ) : (
-              <>
-                <div style={{ ...display, fontSize: 20, marginBottom: 6 }}>INVITE-ONLY BETA</div>
-                <div className="text-sm mb-4" style={{ color: T.muted, lineHeight: 1.6 }}>
-                  MacroForge is the macro tracker that starts at the grocery store. It's free and in closed beta — drop your email and the invite comes straight back.
-                </div>
-              </>
-            )}
-            <div className="flex flex-col gap-2">
-              <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" inputMode="email" autoComplete="email" placeholder="you@example.com"
-                onKeyDown={(e) => { if (e.key === 'Enter') join(); }}
-                className="w-full rounded-xl px-3 py-3 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text }} />
-              <PrimaryBtn onClick={join} full>{state === 'sending' ? 'Sending…' : 'Send my invite'}</PrimaryBtn>
-            </div>
-            {err && <div className="text-xs mt-2.5" style={{ color: '#ff8a8a' }}>{err}</div>}
-            <button onClick={() => setShopOptIn((v) => !v)} className="flex items-start gap-2 mt-3 text-left w-full">
-              <span className="flex items-center justify-center rounded shrink-0" style={{ width: 16, height: 16, marginTop: 1, border: `1.5px solid ${shopOptIn ? T.lime : T.borderHi}`, background: shopOptIn ? T.lime : 'transparent' }}>
-                {shopOptIn && <Check size={11} style={{ color: '#0c0c0e' }} strokeWidth={3} />}
-              </span>
-              <span className="text-xs" style={{ color: T.muted, lineHeight: 1.5 }}>
-                Also tell me about <b style={{ color: T.text }}>Afterload</b> — member deals on real food and gear. Optional, separate from beta emails.
-              </span>
+  return (
+    <div className={inModal ? '' : 'rounded-2xl p-4 mb-3 fadein'} style={inModal ? {} : { background: `linear-gradient(135deg, ${T.limeDim}, ${T.panel})`, border: '1px solid rgba(203,255,58,0.35)' }}>
+      {!inModal && (
+        <div className="flex items-start justify-between gap-2 mb-1">
+          <div className="text-sm" style={{ color: T.text, fontWeight: 700 }}>Get updates and more photo scans</div>
+          <button onClick={onDismiss} title="Not now" aria-label="Not now" style={{ color: T.faint, marginTop: -2 }}><X size={16} /></button>
+        </div>
+      )}
+      <div className="text-xs mb-3" style={{ color: T.muted, lineHeight: 1.55 }}>
+        Add your email for beta updates, and to lift photo scans from 3 a day to 30. Optional — the app works the same either way, and your food data stays on this device.
+      </div>
+      <div className="flex gap-2">
+        <input value={email} onChange={(e) => setEmail(e.target.value)} type="email" inputMode="email" autoComplete="email" placeholder="you@example.com"
+          onKeyDown={(e) => { if (e.key === 'Enter') join(); }}
+          className="flex-1 rounded-lg px-3 py-2 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, minWidth: 0 }} />
+        <button onClick={join} className="rounded-lg px-3 text-sm shrink-0" style={{ background: T.lime, color: '#0c0c0e', fontWeight: 800 }}>
+          {state === 'sending' ? '…' : 'Send'}
+        </button>
+      </div>
+      {err && <div className="text-xs mt-2" style={{ color: '#ff8a8a' }}>{err}</div>}
+      <button onClick={() => setShopOptIn((v) => !v)} className="flex items-start gap-2 mt-2.5 text-left w-full">
+        <span className="flex items-center justify-center rounded shrink-0" style={{ width: 15, height: 15, marginTop: 1, border: `1.5px solid ${shopOptIn ? T.lime : T.borderHi}`, background: shopOptIn ? T.lime : 'transparent' }}>
+          {shopOptIn && <Check size={10} style={{ color: '#0c0c0e' }} strokeWidth={3} />}
+        </span>
+        <span className="text-xs" style={{ color: T.muted, lineHeight: 1.5 }}>
+          Also tell me about <b style={{ color: T.text }}>Afterload</b> — member deals on real food and gear. Optional, separate from beta emails.
+        </span>
+      </button>
+      <div className="mt-2.5">
+        {showKey ? (
+          <div className="flex gap-2">
+            <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="key from your email"
+              onKeyDown={(e) => { if (e.key === 'Enter') redeem(); }}
+              className="flex-1 rounded-lg px-3 py-2 text-xs outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono, minWidth: 0 }} />
+            <button onClick={redeem} className="rounded-lg px-3 text-xs shrink-0" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700 }}>
+              {state === 'checking' ? '…' : 'use key'}
             </button>
-            <div className="text-xs mt-3" style={{ color: T.faint, lineHeight: 1.6 }}>
-              No password, and your food data never leaves your device. Beta updates only — nothing else.
-            </div>
-
-            <div className="mt-4 pt-3" style={{ borderTop: `1px solid ${T.border}` }}>
-              {showKey ? (
-                <div className="flex flex-col gap-2">
-                  <div className="text-xs" style={{ color: T.muted }}>Paste the invite key from your email:</div>
-                  <div className="flex gap-2">
-                    <input value={key} onChange={(e) => setKey(e.target.value)} placeholder="invite key"
-                      onKeyDown={(e) => { if (e.key === 'Enter') redeem(); }}
-                      className="flex-1 rounded-lg px-3 py-2 text-sm outline-none" style={{ background: T.panel2, border: `1px solid ${T.border}`, color: T.text, ...mono, minWidth: 0 }} />
-                    <button onClick={redeem} className="rounded-lg px-3 text-sm shrink-0" style={{ background: T.limeDim, border: `1px solid ${T.border}`, color: T.lime, fontWeight: 700 }}>
-                      {state === 'checking' ? '…' : 'unlock'}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <button onClick={() => setShowKey(true)} className="text-xs" style={{ color: T.faint }}>
-                  Already have an invite key? <span style={{ color: T.lime, fontWeight: 700 }}>Enter it</span>
-                </button>
-              )}
-            </div>
-          </Card>
+          </div>
+        ) : (
+          <button onClick={() => setShowKey(true)} className="text-xs" style={{ color: T.faint }}>
+            Already signed up on another device? <span style={{ color: T.lime, fontWeight: 700 }}>Enter your key</span>
+          </button>
         )}
       </div>
     </div>
@@ -2401,7 +2374,7 @@ function FeedbackModal({ open, onClose }) {
     </Modal>
   );
 }
-function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onManageSync, syncLinked, onSendFeedback, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, onAddStarterPack, foodCount, recipeCount, logCount }) {
+function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onManageSchedule, onManageSync, syncLinked, onSendFeedback, onViewReports, hasAdmin, onExport, onImport, onCopyList, onClearAll, onAddStarterPack, onGetUpdates, foodCount, recipeCount, logCount }) {
   const [confirm, setConfirm] = useState(false);
   const [copied, setCopied] = useState(false);
   const fileRef = useRef(null);
@@ -2420,6 +2393,7 @@ function SettingsModal({ open, onClose, onManageLibrary, onManageRecipes, onMana
         <Row icon={<ChefHat size={18} />} label="Recipes" sub={`${recipeCount} recipe${recipeCount === 1 ? '' : 's'}`} onClick={onManageRecipes} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<Bell size={18} />} label="Meals & reminders" sub="Meal count, times, notifications, daily extras" onClick={onManageSchedule} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         <Row icon={<RefreshCw size={18} />} label="Device sync" sub={syncLinked ? 'Linked — phone & desktop share one history' : 'Local only — link your other devices'} onClick={onManageSync} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
+        {onGetUpdates && <Row icon={<Bell size={18} />} label="Updates & photo scans" sub="Add your email for beta news and 30 photo scans a day" onClick={onGetUpdates} right={<ChevronRight size={16} style={{ color: T.faint }} />} />}
         <Row icon={<MessageSquare size={18} />} label="Send feedback" sub="Bugs, walls, wishes — straight to the builder" onClick={onSendFeedback} right={<ChevronRight size={16} style={{ color: T.faint }} />} />
         {hasAdmin && <Row icon={<ScanLine size={18} />} label="Unknown-food reports" sub="Developer — barcodes the app had no knowledge of" onClick={onViewReports} right={<ChevronRight size={16} style={{ color: T.faint }} />} />}
         {onAddStarterPack && <Row icon={<Sparkles size={18} />} label="Add the starter pack" sub={`${STARTER_FOODS.length} whole foods + ${STARTER_RECIPES.length} meals — skips anything you already have`} onClick={onAddStarterPack} />}
@@ -2634,6 +2608,9 @@ export default function App() {
   const [adminToken, setAdminToken] = useState(() => { try { return localStorage.getItem('mf2_adminToken') || ''; } catch { return ''; } });
   const [notice, setNotice] = useState('');
   const [updateReady, setUpdateReady] = useState(false);
+  // '' until they act; 'dismissed' or 'sent' and the Today card stays away
+  const [emailPromptState, setEmailPromptState] = useState(() => { try { return localStorage.getItem('mf2_emailprompt') || ''; } catch { return ''; } });
+  const [emailOpen, setEmailOpen] = useState(false);
   const meals = mealsOf(settings);
   /* schedules saved by earlier builds used ids the log never referenced */
   useEffect(() => {
@@ -2646,7 +2623,6 @@ export default function App() {
      access: a device with history predates the gate and is never locked out. */
   useEffect(() => {
     if (!ready || invited) return;
-    if (onboarded || log.length || foods.length || syncMeta?.code || adminToken) { setInvited(true); return; }
     let key = '';
     try { key = new URLSearchParams(location.search).get('k') || ''; } catch {}
     if (!key) return;
@@ -2661,15 +2637,24 @@ export default function App() {
         try { history.replaceState(null, '', location.pathname); } catch {}
       })
       .catch(() => {});
-  }, [ready, invited, onboarded, adminToken]);
+  }, [ready, invited]);
   /* funnel: counts only — which channel brought someone, and how far they got.
      Waits for storage so a brand-new device isn't miscounted as returning, and
-     waits for `invited` so this counts people who actually got into the app.
-     Firing on page load instead counted every crawler and every bounce off the
-     gate, which buried the real numbers under an order of magnitude of noise. */
+     waits for a first real interaction so it counts people, not crawlers.
+     Until 9 Nov the invite gate did that job (no bot can unlock it); with the
+     gate gone, firing on load would count every JS-running crawler again — the
+     order-of-magnitude noise fixed in 560b76f. Crawlers do not tap or scroll. */
+  const [human, setHuman] = useState(false);
+  useEffect(() => {
+    if (human) return;
+    const evs = ['pointerdown', 'keydown', 'touchstart', 'wheel'];
+    const mark = () => setHuman(true);
+    evs.forEach((ev) => window.addEventListener(ev, mark, { once: true, passive: true }));
+    return () => evs.forEach((ev) => window.removeEventListener(ev, mark));
+  }, [human]);
   const counted = useRef(false);
   useEffect(() => {
-    if (!ready || !invited || counted.current) return;
+    if (!ready || !human || counted.current) return;
     counted.current = true;
     const seen = hasFired('app_new');
     trackOnce('app_new');
@@ -2677,13 +2662,11 @@ export default function App() {
     const onInstalled = () => trackOnce('install');
     window.addEventListener('appinstalled', onInstalled);
     return () => window.removeEventListener('appinstalled', onInstalled);
-    // `invited` matters: someone who redeems their key mid-session flips it to
-    // true, and without it here that person would never be counted at all
-  }, [ready, invited]);
+  }, [ready, human]);
   /* activation: first food ever logged on this device, whichever way it got there */
   useEffect(() => {
-    if (ready && invited && log.length) trackOnce('first_log');
-  }, [ready, invited, log.length]);
+    if (ready && human && log.length) trackOnce('first_log');
+  }, [ready, human, log.length]);
   /* developer token arrives via #admin=TOKEN in the URL */
   useEffect(() => {
     const m = /^#admin=(.+)$/.exec(window.location.hash || '');
@@ -2986,8 +2969,6 @@ export default function App() {
     }).catch(() => {});
     return () => { navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange); stop(); };
   }, []);
-  // hold the gate until storage has loaded, so an invited device never flashes it
-  if (ready && !invited) return <InviteGate onUnlocked={() => setInvited(true)} />;
   return (
     <div className="min-h-screen w-full" style={{ background: `radial-gradient(130% 75% at 50% -8%, ${T.limeDim}, transparent 55%), ${T.bg}`, color: T.text, fontFamily: "'Archivo', system-ui, sans-serif" }}>
       <style>{`
@@ -3054,7 +3035,15 @@ export default function App() {
         {!ready ? (
           <div className="flex items-center justify-center py-20" style={{ color: T.faint }}><div className="text-sm">Loading your data…</div></div>
         ) : tab === 'today' ? (
+          <>
+          {/* offered after they have had value from the app, never before */}
+          {!invited && log.length > 0 && !emailPromptState && (
+            <EmailPrompt
+              onDismiss={() => { setEmailPromptState('dismissed'); try { localStorage.setItem('mf2_emailprompt', 'dismissed'); } catch {} }}
+              onKeyRedeemed={() => setInvited(true)} />
+          )}
           <TodayView settings={settings} setSettings={setSettings} log={log} setLog={setLog} foods={foods} recipes={recipes} ensureFood={ensureFood} plan={plan} streak={streak} water={water} setWater={setWater} onConsume={takeStock} onRestore={giveStock} />
+          </>
         ) : tab === 'plan' ? (
           <PlanView settings={settings} setSettings={setSettings} plan={plan} setPlan={setPlan} groceries={groceries} setGroceries={setGroceries} pantry={pantry} setPantry={setPantry} foods={foods} recipes={recipes} ensureFood={ensureFood} log={log} meals={meals} onUnknownScan={recordUnknownScan} />
         ) : tab === 'train' ? (
@@ -3070,6 +3059,7 @@ export default function App() {
         onManageSchedule={() => { setSettingsOpen(false); setScheduleOpen(true); }}
         onManageSync={() => { setSettingsOpen(false); setSyncOpen(true); }} syncLinked={!!syncMeta?.code}
         onSendFeedback={() => { setSettingsOpen(false); setFeedbackOpen(true); }}
+        onGetUpdates={invited ? null : () => { setSettingsOpen(false); setEmailOpen(true); }}
         onViewReports={() => { setSettingsOpen(false); setReportsOpen(true); }} hasAdmin={!!adminToken}
         onExport={exportData} onImport={importFile} onCopyList={copyList} onClearAll={clearAll}
         onAddStarterPack={() => { setSettingsOpen(false); addStarterPack(); }}
@@ -3081,6 +3071,9 @@ export default function App() {
       <SyncModal open={syncOpen} onClose={() => setSyncOpen(false)} meta={syncMeta} status={syncStatus}
         onCreate={syncCreate} onJoin={syncJoin} onSyncNow={doSync} onUnlink={syncUnlink} onDeleteRemote={syncDeleteRemote} />
       <FeedbackModal open={feedbackOpen} onClose={() => setFeedbackOpen(false)} />
+      <Modal open={emailOpen} onClose={() => setEmailOpen(false)} title="Updates & photo scans" icon={<Bell size={16} style={{ color: T.lime }} />}>
+        <EmailPrompt inModal onDismiss={() => setEmailOpen(false)} onKeyRedeemed={() => { setInvited(true); setEmailOpen(false); }} />
+      </Modal>
       <OnboardingModal open={onboardOpen} onDone={() => { setOnboardOpen(false); setOnboarded(true); if (!seedState) setSeedState('dismissed'); }}
         settings={settings} setSettings={setSettings} onAddStarterPack={addStarterPack}
         onCreateSync={syncCreate} syncCode={syncMeta?.code || ''} />

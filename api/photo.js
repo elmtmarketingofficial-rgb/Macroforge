@@ -132,7 +132,7 @@ export default async function handler(req, res) {
     return res.status(429).json({
       error: quota.keyed
         ? `That's ${quota.cap} photos today — the daily limit resets tomorrow.`
-        : 'Photo analysis is for invited testers. Open the app from your invite link and try again.',
+        : `That's your ${quota.cap} free photo scans for today. Add your email in Settings → Updates & photo scans to get 30 a day.`,
       keyed: quota.keyed,
     });
   }

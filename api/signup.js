@@ -14,10 +14,10 @@ const inviteText = (link, key) => `Thanks for jumping on the beta.
 
 MacroForge is a macro tracker that starts where your week actually starts: the grocery store. It builds your meal plan from the food you'll actually have, and while you're shopping you can scan a barcode and find out whether that item is worth buying for the week you're having.
 
-Open this on your phone — the link is yours and unlocks the app:
+Open this on your phone — it also switches on 30 photo scans a day there:
 ${link}
 
-If you ever need to unlock another device by hand, your invite key is: ${key}
+Using it on a second device? Enter this key there, under Settings → Updates & photo scans: ${key}
 
 Three things worth doing first (about two minutes):
 
@@ -48,7 +48,7 @@ const inviteHtml = (link, key) => `<!doctype html><html><body style="margin:0;pa
   <p style="color:#c9c9cf;margin:0 0 18px;">MacroForge is a macro tracker that starts where your week actually starts: the grocery store. It builds your meal plan from the food you'll actually have, and while you're shopping you can scan a barcode and find out whether that item is worth buying for the week you're having.</p>
 
   <p style="margin:0 0 10px;"><a href="${link}" style="display:inline-block;background:#cbff3a;color:#0c0c0e;font-weight:800;text-decoration:none;padding:13px 24px;border-radius:12px;">Open MacroForge</a></p>
-  <p style="color:#5b5b65;font-size:12px;margin:0 0 26px;">This link is yours and unlocks the beta. Unlocking another device by hand? Your invite key is <span style="color:#c9c9cf;font-family:ui-monospace,monospace;">${key}</span></p>
+  <p style="color:#5b5b65;font-size:12px;margin:0 0 26px;">This link switches on 30 photo scans a day on the device you open it on. On another device? Enter your key under Settings → Updates & photo scans: <span style="color:#c9c9cf;font-family:ui-monospace,monospace;">${key}</span></p>
 
   <div style="font-size:11px;letter-spacing:1.5px;color:#5b5b65;font-weight:700;margin-bottom:10px;">THREE THINGS FIRST</div>
   <p style="color:#c9c9cf;margin:0 0 10px;"><b style="color:#f3f3f1;">1. Install it.</b> Your browser will offer &ldquo;Add to Home Screen&rdquo; or &ldquo;Install app&rdquo;. It then runs like a normal app and works offline.</p>

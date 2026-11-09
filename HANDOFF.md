@@ -62,24 +62,29 @@ sales lead). `info@macroforge.club` is an alias landing in the same inbox; it's 
 sends from and the only address safe to publish. Anything else on the domain bounces —
 `support@`, `hello@` and friends have no mailbox, so never print them in a post, bio, or video.
 
-## Invite-only: how access actually works
+## Open to anyone: how access works (changed 9 Nov 2026)
 
-The app can't be used without signing up first. Someone who lands on macroforge.club sees a
-gate, not the app. This shapes every campaign — **the call to action is always "get an invite",
-never "try it now"**, and scarcity/exclusivity is a legitimate angle to lean on.
+**The app is open.** Anyone who lands on macroforge.club gets the app straight away — no
+email, no invite, no wait. Until 9 Nov it sat behind an invite gate; Ethan removed it after
+naming the "download and access hassle" as the reason nobody used it. **The call to action
+is now "open it", never "get an invite"**, and exclusivity is no longer an angle — don't use
+it in copy.
 
-The flow: enter email → invite arrives within seconds → the link in it (`?k=…`) unlocks the app
-on that device permanently. The email also prints the key in plain text so a second device can
-be unlocked by hand; a key works on up to 8 devices, so a link pasted publicly stops working.
-Someone who loses the email can re-enter their address to have it resent (throttled to once an
-hour so it can't be used to bombard anyone).
+Email is now an offer, not a wall. It's made in two places: a card on Today that appears
+*after* someone logs their first food, and a permanent Settings row ("Updates & photo
+scans"). Signing up gets beta updates and lifts AI photo scans from 3 a day to 30 — the key
+in the email is what the daily allowance counts against. It is **not** a backup (sync codes
+are) and copy must not imply it is.
+
+The Afterload consent box sits under both, unticked, exactly as before.
 
 Practical consequences for marketing:
 
-- **Every signup is a real, deliverable email address**, so the signup number is a true lead count.
-- **The gate is the conversion point.** If people arrive and don't sign up, the gate copy is the
-  thing to change — that's a code change, so bring it back to Claude Code.
-- **Anyone you want to demo it to needs an invite**, including press, friends, and collaborators.
+- **Signups stop being the top-of-funnel number.** Opening the app no longer requires one,
+  so `app_new` (counted on a first real tap, which also screens out crawlers) is now the
+  arrival count, and signups are a measure of who wanted more.
+- **Demos need nothing.** Send anyone the link.
+- **The landing page leads with "Open MacroForge"**; the email form is under "Get updates".
 
 ## Measurement: what you can see
 
@@ -95,13 +100,18 @@ whoever brought someone in keeps it even if they return later by typing the addr
 clear name per channel (`reddit`, `instagram`, `tiktok`, `x`) and keep it consistent — the
 dashboard groups by exactly that string.
 
-### ⚠️ Do NOT promote yet: AI photo logging
+### AI photo logging — live, but check it on the day
 
-The feature is fully built and deployed, but it needs API credits on Ethan's Anthropic account
-before it actually analyzes anything. Right now testers who tap it get a polite "not switched on
-for this beta yet" message. **Until credits are added, no post, script, or caption should mention
-photo logging.** Once it's on, it's arguably the strongest hook in the arsenal — treat it as a
-held-back launch beat, not part of round one.
+Live as of 9 Nov 2026: snap a plate and get a macro breakdown, or photograph an unlabelled
+item in the store for a buy/skip verdict. It is arguably the strongest hook available.
+
+**It has gone dark without warning twice**, because it shares an Anthropic balance with another
+project and nothing alerts when that drains. So: before any post, script or caption leads with
+it, confirm it works *that day* (a real `POST /api/photo` returning 200). Testers see a polite
+"temporarily unavailable" when it is off — survivable for a tester, a broken promise for someone
+who just clicked an ad for it.
+
+Anyone can use it without signing up — 3 scans a day. Adding an email lifts that to 30.
 
 ---
 

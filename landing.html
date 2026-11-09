@@ -105,7 +105,7 @@
     </header>
 
     <div class="hero">
-      <div class="beta-chip"><span class="dot"></span> FREE BETA — NOW TAKING TESTERS</div>
+      <div class="beta-chip"><span class="dot"></span> FREE BETA — NO SIGNUP NEEDED</div>
       <h1 class="display">Plan from your <span class="lime">cart</span>.<br />Hit your macros.</h1>
       <p class="sub">
         Every macro app starts at the plate. MacroForge starts where your week actually starts —
@@ -113,7 +113,8 @@
         barcodes against what your body still needs, and coaches your calories from your own data.
       </p>
       <div class="cta-row">
-        <a class="btn btn-primary" href="#join">Join the beta</a>
+        <a class="btn btn-primary" href="/">Open MacroForge</a>
+        <a class="btn btn-ghost" href="#join">Get updates</a>
       </div>
     </div>
 
@@ -164,12 +165,12 @@
 
     <section id="join">
       <div class="signup">
-        <h2 class="display">Get in early</h2>
-        <p>The beta is free and installs on your phone or desktop straight from the browser — no app store needed. Drop your email and we'll send the link plus what's new as it ships.</p>
+        <h2 class="display">Get updates</h2>
+        <p>MacroForge is free and open — <a href="/" style="color:var(--lime);font-weight:700;">just open it</a>, no signup needed. Add your email if you want beta news as it ships, and 30 AI photo scans a day instead of 3.</p>
         <form id="f" novalidate>
           <div class="form-row">
             <input id="email" type="email" placeholder="you@example.com" autocomplete="email" required />
-            <button class="btn btn-primary" type="submit" id="go">Count me in</button>
+            <button class="btn btn-primary" type="submit" id="go">Send me updates</button>
           </div>
           <div class="device-row" id="devices">
             <button type="button" class="device-chip" data-v="iPhone">iPhone</button>
@@ -182,8 +183,8 @@
             <input type="checkbox" id="afterload" />
             <span>Also tell me about <b>Afterload</b> — member deals on real food and gear from our shop. Entirely optional, separate from your beta emails.</span>
           </label>
-          <div class="fine">Your email is used for the beta invite and updates about MacroForge — nothing else, no sharing, unsubscribe any time.</div>
-          <div class="ok" id="ok">You're on the list — watch your inbox for the invite.</div>
+          <div class="fine">Your email is used for updates about MacroForge — nothing else, no sharing, unsubscribe any time.</div>
+          <div class="ok" id="ok">Done — check your inbox. The link in it also switches on 30 photo scans a day.</div>
           <div class="err" id="err">That didn't go through — check the email and try again.</div>
         </form>
       </div>
@@ -256,7 +257,7 @@
           document.getElementById('f').reset(); // also clears the consent box
           chips.forEach(function (x) { x.classList.remove('on'); });
         }).catch(function () { err.style.display = 'block'; })
-          .finally(function () { go.disabled = false; go.textContent = 'Count me in'; });
+          .finally(function () { go.disabled = false; go.textContent = 'Send me updates'; });
       });
     })();
   </script>

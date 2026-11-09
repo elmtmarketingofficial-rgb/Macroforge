@@ -30,7 +30,7 @@ against production this session, not inferred:
 
 Production has been running the 30 Aug deployment untouched for 44 days.
 
-**Built and verified previously:** the app (macroforge.club), invite-only gate,
+**Built and verified previously:** the app (macroforge.club) — open to anyone since 9 Nov, no gate —
 automated invite email, real mailbox, privacy-preserving funnel analytics,
 device sync, barcode scanner, ingredients-first planner, reminders.
 
@@ -150,8 +150,8 @@ self-inflicted, and an app store does not fix it. Both are in the table.
 
 | Item | Owner | Status |
 |---|---|---|
-| **Remove access friction — the invite gate** | Ethan decides, Claude Code builds | **open — see open question 5** |
-| **Store listing — Play and/or App Store** | Ethan decides spend + creates accounts, Claude Code builds | **open — see open question 6** |
+| **Remove access friction — the invite gate** | Ethan decided, Claude Code built | **done 9 Nov** — gate removed, email now an optional card after first log; verified on production |
+| **Store listing — Google Play** | Ethan: $25 + Play Console account. Claude Code: package + listing | **in progress 9 Nov** — decided: Android now, iPhone after first activation numbers |
 | Read the funnel post-`560b76f` and record it above | Claude Code | **done 13 Oct, again 9 Nov** |
 | Add Anthropic credits → photo logging on | Ethan | **done again 9 Nov** (verified 200) |
 | Real screenshots from a phone with real data | Ethan | open since 7 Aug |
@@ -247,13 +247,10 @@ questions.
 Tracked here so the next session doesn't re-litigate settled facts. These are
 outside this file and need someone with edit rights on them:
 
-- `HANDOFF.md:98-104` — the "⚠️ Do NOT promote yet: AI photo logging" block.
-  Photo logging is funded and live; the block should say so, and the standing
-  rule is now constraint 6 above (verify-before-claiming), not a blanket ban.
-- `HANDOFF.md:177` — "Photo logging is dark until credits (see above)" should
-  come off the blocking-gaps list. Items 1 and 2 (screenshots, demo video)
-  are still true.
-
+- ~~`HANDOFF.md` photo blocks~~ — fixed 9 Nov (now: live, verify on the day).
+- `PROMO-QUEUE-2026-09.md:161` and `:189` — two drafted posts still say the app is
+  "invite-only". **False since 9 Nov.** That is Cowork's copy; it should be corrected there
+  before either post goes out, and the CTA changed from "get an invite" to "open it".
 ---
 
 ## Open questions — not decided, do not invent an answer
@@ -272,12 +269,12 @@ outside this file and need someone with edit rights on them:
 4. **Whether the two pre-checkbox testers get the Afterload opt-in email.**
    Constraint 3 says it is the only legitimate route to shop consent, and it
    is gated on Afterload being stocked. Not scheduled.
-5. **The invite gate — keep, make optional, or remove.** Ethan asked for it on
+5. ~~**The invite gate.**~~ **DECIDED 9 Nov: optional.** Ethan asked for it on
    6 Aug ("they can't just access the application without going through the
    email sign up first"). On 7–8 Nov he named access hassle as the reason
    nobody uses the app. Those pull against each other; reversing his own
    instruction is his call. *Raised 9 Nov.*
-6. **Which store listings, given cash.** Google Play is $25 once; Apple is
+6. ~~**Which store listings.**~~ **DECIDED 9 Nov: Android now, iPhone later.** Google Play is $25 once; Apple is
    $99 a year. Rent is the live constraint. 3 of the 4 signups with a known
    device are iPhone, so Android-first serves the minority and iOS is the
    expensive one. *Raised 9 Nov.*

@@ -9,3 +9,7 @@ dev-dist/
 
 .secrets.local
 .env.prodcheck
+
+# Git Bash on Windows can turn `/dev/null` or `> nul` into a real file
+# called nul when it is handed to a native CLI. Never stage one.
+nul

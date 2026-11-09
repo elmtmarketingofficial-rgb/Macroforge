@@ -34,21 +34,15 @@ Production has been running the 30 Aug deployment untouched for 44 days.
 automated invite email, real mailbox, privacy-preserving funnel analytics,
 device sync, barcode scanner, ingredients-first planner, reminders.
 
-**AI photo logging — DARK AGAIN as of 13 Oct 2026.** `POST /api/photo` returns
-`503 {"configured": false}`. Diagnosed this session, not guessed: the
-`ANTHROPIC_API_KEY` is still present and still *valid* (a `GET /v1/models` with
-it returns 200), but a minimal `POST /v1/messages` comes back
-`400 "Your credit balance is too low"`. **The key is fine; the shared balance is
-empty.** This is exactly the silent-degradation failure described under "Live
-risk to the gate" below — it drained some time between 12 Aug and 2 Sep (the
-2 Sep promo queue already recorded it dark) and nothing reported it for roughly
-six weeks.
+**AI photo logging — LIVE AGAIN as of 9 Nov 2026.** Ethan topped up the shared
+Anthropic balance; a real `POST /api/photo` returned 200 the same day and
+correctly read the test image as "a logo, no food visible" rather than
+inventing a meal. It was dark from roughly early September until then.
 
-*This section said "LIVE, funded 12 Aug" until 13 Oct. That was true when
-written and is now false. Re-verify with a real POST before writing it either
-way — this is the second time this document has been wrong about this feature
-in opposite directions.*
-
+*History, so nobody trusts this line blindly: live 7 Aug → dark ~Sep → live
+12 Aug claim → found dark 13 Oct → live 9 Nov. The cause every time is the
+balance it shares with the Prediction Desk, and nothing alerts when it drains
+(open question 1). Re-verify with a real POST before writing this either way.*
 **Not built:** anything to do with membership, billing, or the shop.
 
 **The number that matters:** signups vs `first_log`.
@@ -59,10 +53,16 @@ table used to carry is now cleared.
 | Window | Signups | Opened app | **Logged food** | Planned a week | Scanned |
 |---|---|---|---|---|---|
 | 60d (14 Aug – 13 Oct, all post-`560b76f`) | 3 | 1 | **1** | 0 | 1 |
+| **27d (13 Oct – 9 Nov)** | **0** | **0** | **0** | 0 | 0 |
 | 90d (all time, pre-fix data contaminated) | 9 events / 5 real rows | 81 | **2** | 0 | 1 |
 
 Signup list holds **5 real addresses** (7 Aug ×2, 14 Aug, 22 Aug, 6 Oct). The
 6 Oct one is the first to tick the Afterload consent box.
+
+**9 Nov update:** the four weeks since the last reading produced nothing — no
+signups, no new opens, no logs; only 8 returning opens. Signup list is 6 (the
+13 Oct arrival ticked the Afterload box, so 2 of 6 have shop consent). Ethan's
+own diagnosis of why is in Phase 1 below.
 
 Read honestly: **5 people have signed up over two months and 2 have ever logged
 food. Nobody has generated a week's plan — the thing the product is for.** No
@@ -134,10 +134,26 @@ Open, unowned: nothing alerts on the balance. See "Open questions" below.
 
 Nothing else starts until this is done.
 
+**Reordered 9 Nov 2026 by Ethan** (`jarvis/work/handoffs/HANDOFF-AFTERLOAD.md`,
+from his 7–8 Nov voice notes). The funnel is not under-promoted, it is
+**blocked at the install step**. His words: *"Nobody wants to go through all the
+download and access hassle... that was a lot of work just to download a single
+app."* So activation is not failing — it is currently **unmeasurable**, which
+must not be reported as a pass or a fail. Order is now: remove install
+friction → measure activation → decide the USP and promote.
+
+Engineering note on that diagnosis: the hassle has two halves. **Download**
+(no store listing; iOS has no install prompt) is what an app store fixes.
+**Access** (the invite gate: email → wait → open mail → tap link, and on iOS
+the home-screen app has its own storage so it asks for the key *again*) is
+self-inflicted, and an app store does not fix it. Both are in the table.
+
 | Item | Owner | Status |
 |---|---|---|
-| Read the funnel post-`560b76f` and record it above | Claude Code | **done 13 Oct** |
-| Add Anthropic credits → photo logging on | Ethan | **REGRESSED — balance drained again, dark since ~Sep** |
+| **Remove access friction — the invite gate** | Ethan decides, Claude Code builds | **open — see open question 5** |
+| **Store listing — Play and/or App Store** | Ethan decides spend + creates accounts, Claude Code builds | **open — see open question 6** |
+| Read the funnel post-`560b76f` and record it above | Claude Code | **done 13 Oct, again 9 Nov** |
+| Add Anthropic credits → photo logging on | Ethan | **done again 9 Nov** (verified 200) |
 | Real screenshots from a phone with real data | Ethan | open since 7 Aug |
 | Get Afterload actually stocked | Ethan | open since 7 Aug (also blocks Phase 3) |
 | First channel post (r/mealprep, tagged `?utm_source=reddit`) | Cowork | open |
@@ -146,12 +162,10 @@ Nothing else starts until this is done.
 **Success looks like:** people signing up, opening the app, and logging food
 without being talked through it.
 
-Note for whoever picks up the copy work: photo logging is **dark again as of
-13 Oct** and is not mentioned anywhere on `landing.html`. Leave it that way.
-Constraint 6 blocks promoting it until the balance is topped up AND a real POST
-to `/api/photo` returns 200. It is the strongest hook available, so it is worth
-unblocking — but promoting it while it 503s would hand every new arrival a
-broken promise on first contact.
+Note for whoever picks up the copy work: photo logging is **live again as of
+9 Nov** and is still not on `landing.html`. Constraint 6 now permits it, but
+whether it leads is open question 2 — and check it returns 200 on the day the
+copy goes out, because it has gone dark without warning twice.
 
 ## Phase 2 — Fix what Phase 1 exposes
 
@@ -175,8 +189,9 @@ do this, because none of them know what you're short on. That is the moat.
 
 ## Phase 4 — Reach
 
-App store distribution via a Capacitor wrapper, and voice logging (Cronometer
-shipped it April 2026; it's becoming table stakes). Both deferred deliberately.
+Voice logging (Cronometer shipped it April 2026; it's becoming table stakes).
+Deferred. *App store distribution lived here until 9 Nov 2026, when Ethan named
+the install as the blocker; it is now in Phase 1.*
 
 ---
 
@@ -213,7 +228,7 @@ questions.
    thing, not a brand doing marketing.
 
 6. **Don't promote what isn't on — and check, don't assume.** Photo logging is
-   **OFF as of 13 Oct 2026**, so this blocks mentioning it again. The rule, in
+   **ON as of 9 Nov 2026** (it was off 13 Oct), so this does not block it today. The rule, in
    its sharpest form: **before any copy claims a feature works, confirm the
    feature works that day**, because the shared Anthropic balance above takes
    photo logging down without notice — it has now done so twice. A tester
@@ -257,6 +272,19 @@ outside this file and need someone with edit rights on them:
 4. **Whether the two pre-checkbox testers get the Afterload opt-in email.**
    Constraint 3 says it is the only legitimate route to shop consent, and it
    is gated on Afterload being stocked. Not scheduled.
+5. **The invite gate — keep, make optional, or remove.** Ethan asked for it on
+   6 Aug ("they can't just access the application without going through the
+   email sign up first"). On 7–8 Nov he named access hassle as the reason
+   nobody uses the app. Those pull against each other; reversing his own
+   instruction is his call. *Raised 9 Nov.*
+6. **Which store listings, given cash.** Google Play is $25 once; Apple is
+   $99 a year. Rent is the live constraint. 3 of the 4 signups with a known
+   device are iPhone, so Android-first serves the minority and iOS is the
+   expensive one. *Raised 9 Nov.*
+7. **Afterload's launch shape** — compromise/dropship start versus a tiny
+   catalogue he can stand behind. Explicitly his call per the handoff; the
+   engineering side owes him a one-page choice, not a recommendation.
+   *Raised 9 Nov.*
 
 ---
 
